@@ -1,15 +1,34 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { GameShell } from '../../components/GameShell'
+import { GameModeSelect } from '../../components/GameModeSelect'
+import { VsSequencer } from '../../components/VsSequencer'
 import { LocalLeaderboard } from '../../components/LocalLeaderboard'
 import { addRun, getRuns } from '../../lib/leaderboard'
+import {
+  createRunConfig,
+  difficultyForRound,
+  ENDLESS_LIVES,
+  FIXED_ROUNDS,
+  isMiss,
+  markDailyPlayed,
+  rngFor,
+  type RunConfig,
+} from '../../lib/modes'
+import type { Rng } from '../../lib/rng'
 
 const GAME_ID = 'crowd'
-const ROUNDS = 5
+
+// t: 0 (easiest) -> 1 (hardest). Dot count ramps 8 -> 17 for fixed-length
+// modes; endless is allowed to climb further (up to 26) since it keeps
+// getting harder the longer a run survives.
 const BASE_DOTS = 8
-const DOTS_INCREMENT = 2
-const MAX_DOTS = 16
+const MAX_DOTS_FIXED = 17
+const MAX_DOTS_ENDLESS = 26
+
 const HIGHLIGHT_MS = 1000
-const MOVE_MS = 3500
+const BASE_MOVE_MS = 3500
+const MAX_MOVE_MS_BONUS = 2000 // extra tracking time (and difficulty) at t=1
+
 const DOT_R = 4 // dot "radius" in board percentage-space, keeps dots off the edges
 const MIN_SEPARATION_PCT = 12
 // The board keeps a 4/3 aspect ratio, so a dot moving at the same %/s in x
@@ -32,23 +51,34 @@ type Round = {
 
 type Stage = 'highlight' | 'moving' | 'guessing'
 
-function randomDots(count: number): DotState[] {
+function dotCountFor(t: number, isEndless: boolean): number {
+  const max = isEndless ? MAX_DOTS_ENDLESS : MAX_DOTS_FIXED
+  return Math.round(BASE_DOTS + t * (max - BASE_DOTS))
+}
+
+function moveMsFor(t: number): number {
+  return BASE_MOVE_MS + t * MAX_MOVE_MS_BONUS
+}
+
+function randomDots(rng: Rng, count: number, t: number): DotState[] {
   const dots: DotState[] = []
   for (let id = 0; id < count; id++) {
     let x = 0
     let y = 0
     let attempts = 0
     do {
-      x = DOT_R + Math.random() * (100 - 2 * DOT_R)
-      y = DOT_R + Math.random() * (100 - 2 * DOT_R)
+      x = DOT_R + rng() * (100 - 2 * DOT_R)
+      y = DOT_R + rng() * (100 - 2 * DOT_R)
       attempts++
     } while (
       attempts < 40 &&
       dots.some((d) => Math.hypot(d.x - x, d.y - y) < MIN_SEPARATION_PCT)
     )
 
-    const angle = Math.random() * Math.PI * 2
-    const speed = 10 + Math.random() * 8 // %/s
+    const angle = rng() * Math.PI * 2
+    const speedMin = 10 + t * 8
+    const speedRange = 8 + t * 8
+    const speed = speedMin + rng() * speedRange // %/s, faster at higher difficulty
     dots.push({
       id,
       x,
@@ -87,13 +117,71 @@ function stepDots(dots: DotState[], dt: number) {
 }
 
 export function CrowdGame() {
+  const [config, setConfig] = useState<RunConfig | null>(null)
+
+  return (
+    <GameShell eyebrow="Perception" title="Crowd">
+      {!config ? (
+        <GameModeSelect gameId={GAME_ID} onStart={setConfig} />
+      ) : config.mode === 'vs' && config.vs ? (
+        <VsSequencer
+          playerCount={config.vs.playerCount}
+          seed={config.seed}
+          onExit={() => setConfig(null)}
+          renderRun={(runConfig, onFinish) => (
+            <CrowdRun
+              key={`${runConfig.seed}-${runConfig.vs?.playerIndex ?? 0}`}
+              config={runConfig}
+              onFinish={onFinish}
+              onChangeMode={() => setConfig(null)}
+            />
+          )}
+        />
+      ) : (
+        <CrowdRun
+          key={config.seed}
+          config={config}
+          onChangeMode={() => setConfig(null)}
+          onPlayAgain={
+            config.mode === 'daily'
+              ? undefined
+              : () => setConfig(createRunConfig(config.mode, GAME_ID))
+          }
+        />
+      )}
+    </GameShell>
+  )
+}
+
+function modeLabel(config: RunConfig): string {
+  if (config.vs) return `Player ${config.vs.playerIndex + 1} of ${config.vs.playerCount}`
+  if (config.mode === 'daily') return 'Daily challenge'
+  if (config.mode === 'endless') return 'Endless'
+  return 'Practice'
+}
+
+function CrowdRun({
+  config,
+  onFinish,
+  onChangeMode,
+  onPlayAgain,
+}: {
+  config: RunConfig
+  onFinish?: (score: number) => void
+  onChangeMode: () => void
+  onPlayAgain?: () => void
+}) {
+  const rng = useMemo(() => rngFor(config), [config])
+  const isEndless = config.mode === 'endless'
+
   const [phase, setPhase] = useState<'intro' | 'playing' | 'roundResult' | 'done'>(
     'intro',
   )
   const [stage, setStage] = useState<Stage>('highlight')
   const [rounds, setRounds] = useState<Round[]>([])
   const [dots, setDots] = useState<DotState[]>([])
-  const [runs, setRuns] = useState(() => getRuns(GAME_ID, 'daily'))
+  const [lives, setLives] = useState(ENDLESS_LIVES)
+  const [runs, setRuns] = useState(() => getRuns(GAME_ID, config.mode))
 
   const dotsRef = useRef<DotState[]>([])
   const rafRef = useRef<number | null>(null)
@@ -115,7 +203,7 @@ export function CrowdGame() {
 
   useEffect(() => clearTimers, [])
 
-  function startMoving() {
+  function startMoving(moveMs: number) {
     const start = performance.now()
     let last = start
 
@@ -125,7 +213,7 @@ export function CrowdGame() {
       stepDots(dotsRef.current, dt)
       setDots(dotsRef.current.map((d) => ({ ...d })))
 
-      if (now - start < MOVE_MS) {
+      if (now - start < moveMs) {
         rafRef.current = requestAnimationFrame(frame)
       } else {
         rafRef.current = null
@@ -136,11 +224,13 @@ export function CrowdGame() {
     rafRef.current = requestAnimationFrame(frame)
   }
 
-  function startRound(index: number) {
+  function startRound(roundNum: number) {
     clearTimers()
-    const count = Math.min(MAX_DOTS, BASE_DOTS + index * DOTS_INCREMENT)
-    const newDots = randomDots(count)
-    const targetId = newDots[Math.floor(Math.random() * newDots.length)].id
+    const t = difficultyForRound(roundNum, config.mode)
+    const count = dotCountFor(t, isEndless)
+    const moveMs = moveMsFor(t)
+    const newDots = randomDots(rng, count, t)
+    const targetId = newDots[Math.floor(rng() * newDots.length)].id
 
     dotsRef.current = newDots
     setDots(newDots)
@@ -150,13 +240,14 @@ export function CrowdGame() {
 
     highlightTimeoutRef.current = setTimeout(() => {
       setStage('moving')
-      startMoving()
+      startMoving(moveMs)
     }, HIGHLIGHT_MS)
   }
 
   function startGame() {
     setRounds([])
-    startRound(0)
+    setLives(ENDLESS_LIVES)
+    startRound(1)
   }
 
   function handleBoardClick(e: React.MouseEvent<HTMLDivElement>) {
@@ -185,27 +276,37 @@ export function CrowdGame() {
     setRounds((rs) =>
       rs.map((r, i) => (i === currentIndex ? { ...r, guessId, correct, score } : r)),
     )
+    if (isEndless && isMiss(score)) setLives((l) => l - 1)
     setPhase('roundResult')
   }
 
-  function nextRound() {
-    if (rounds.length >= ROUNDS) {
-      const total = rounds.reduce((sum, r) => sum + r.score, 0) / rounds.length
-      const updated = addRun(GAME_ID, 'daily', total)
-      setRuns(updated)
-      setPhase('done')
+  function finish(finalScore: number) {
+    if (onFinish) {
+      onFinish(finalScore)
       return
     }
-    startRound(rounds.length)
+    if (config.mode === 'daily') markDailyPlayed(GAME_ID, finalScore)
+    if (config.mode !== 'practice') setRuns(addRun(GAME_ID, config.mode, finalScore))
+    setPhase('done')
   }
 
-  function playAgain() {
-    clearTimers()
-    setRounds([])
-    setDots([])
-    setStage('highlight')
-    setPhase('intro')
+  function nextRound() {
+    if (isEndless) {
+      if (lives <= 0) {
+        finish(rounds.length)
+        return
+      }
+      startRound(rounds.length + 1)
+      return
+    }
+    if (rounds.length >= FIXED_ROUNDS) {
+      finish(rounds.reduce((sum, r) => sum + r.score, 0) / rounds.length)
+      return
+    }
+    startRound(rounds.length + 1)
   }
+
+  const isRunOver = isEndless ? lives <= 0 : rounds.length >= FIXED_ROUNDS
 
   const statusLabel =
     phase === 'playing'
@@ -217,12 +318,26 @@ export function CrowdGame() {
       : null
 
   return (
-    <GameShell eyebrow="Perception" title="Crowd">
+    <div>
       {phase === 'intro' && (
         <div style={{ textAlign: 'center' }}>
+          <div
+            style={{
+              fontSize: 13,
+              fontWeight: 600,
+              color: 'var(--text-faint)',
+              textTransform: 'uppercase',
+              marginBottom: 8,
+            }}
+          >
+            {modeLabel(config)}
+          </div>
           <p style={{ color: 'var(--text-dim)', maxWidth: 420, margin: '0 auto 28px' }}>
             One dot flashes, then the crowd scatters. Track it and click it once
-            they stop. {ROUNDS} rounds, the crowd grows each time.
+            they stop.{' '}
+            {isEndless
+              ? `${ENDLESS_LIVES} lives — the crowd grows and moves faster the longer you survive.`
+              : `${FIXED_ROUNDS} rounds, the crowd grows each time.`}
           </p>
           <PlayButton onClick={startGame} label="Start" />
         </div>
@@ -230,7 +345,11 @@ export function CrowdGame() {
 
       {(phase === 'playing' || phase === 'roundResult') && current && (
         <div>
-          <RoundProgress index={currentIndex} total={ROUNDS} />
+          {isEndless ? (
+            <EndlessHud round={rounds.length} lives={lives} />
+          ) : (
+            <RoundProgress index={currentIndex} total={FIXED_ROUNDS} />
+          )}
           {statusLabel && (
             <div
               style={{
@@ -296,7 +415,7 @@ export function CrowdGame() {
               </div>
               <PlayButton
                 onClick={nextRound}
-                label={rounds.length >= ROUNDS ? 'See results' : 'Next round'}
+                label={isRunOver ? 'See results' : 'Next round'}
               />
             </div>
           )}
@@ -305,46 +424,59 @@ export function CrowdGame() {
 
       {phase === 'done' && (
         <div>
-          <div
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 8,
-              marginBottom: 20,
-            }}
-          >
-            {rounds.map((r, i) => (
-              <div
-                key={i}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  fontSize: 14,
-                  color: 'var(--text-dim)',
-                }}
-              >
-                <span>Round {i + 1}</span>
-                <span>{r.count} dots</span>
-                <span style={{ fontWeight: 600, color: 'var(--text)' }}>
-                  {r.correct ? 'Hit' : 'Miss'} · {r.score.toFixed(0)}
-                </span>
-              </div>
-            ))}
-          </div>
+          {!isEndless && (
+            <div
+              style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 20 }}
+            >
+              {rounds.map((r, i) => (
+                <div
+                  key={i}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    fontSize: 14,
+                    color: 'var(--text-dim)',
+                  }}
+                >
+                  <span>Round {i + 1}</span>
+                  <span>{r.count} dots</span>
+                  <span style={{ fontWeight: 600, color: 'var(--text)' }}>
+                    {r.correct ? 'Hit' : 'Miss'} · {r.score.toFixed(0)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
           <div style={{ textAlign: 'center' }}>
             <div style={{ fontSize: 13, color: 'var(--text-faint)' }}>
-              AVERAGE SCORE
+              {isEndless ? 'ROUNDS SURVIVED' : 'AVERAGE SCORE'}
             </div>
             <div style={{ fontSize: 44, fontWeight: 700, margin: '4px 0 24px' }}>
-              {(rounds.reduce((s, r) => s + r.score, 0) / rounds.length).toFixed(1)}
+              {isEndless
+                ? rounds.length
+                : (rounds.reduce((s, r) => s + r.score, 0) / rounds.length).toFixed(1)}
             </div>
-            <PlayButton onClick={playAgain} label="Play again" />
+            {onPlayAgain ? (
+              <PlayButton onClick={onPlayAgain} label="Play again" />
+            ) : (
+              <div style={{ color: 'var(--text-dim)', fontSize: 14 }}>
+                Come back tomorrow for a new Daily.
+              </div>
+            )}
           </div>
-          <LocalLeaderboard runs={runs} />
+          <div style={{ textAlign: 'center', marginTop: 16 }}>
+            <LinkButton onClick={onChangeMode} label="Change mode" />
+          </div>
+          {config.mode !== 'practice' && (
+            <LocalLeaderboard
+              runs={runs}
+              formatScore={isEndless ? (s) => `${s.toFixed(0)} rounds` : undefined}
+            />
+          )}
         </div>
       )}
-    </GameShell>
+    </div>
   )
 }
 
@@ -369,6 +501,37 @@ function RoundProgress({ index, total }: { index: number; total: number }) {
           }}
         />
       ))}
+    </div>
+  )
+}
+
+function EndlessHud({ round, lives }: { round: number; lives: number }) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 16,
+        marginBottom: 16,
+        fontSize: 13,
+        color: 'var(--text-dim)',
+      }}
+    >
+      <span>Round {round}</span>
+      <span style={{ display: 'flex', gap: 4 }}>
+        {Array.from({ length: ENDLESS_LIVES }).map((_, i) => (
+          <span
+            key={i}
+            style={{
+              width: 8,
+              height: 8,
+              borderRadius: '50%',
+              background: i < lives ? 'var(--danger)' : 'var(--border)',
+            }}
+          />
+        ))}
+      </span>
     </div>
   )
 }
@@ -418,6 +581,24 @@ function PlayButton({ onClick, label }: { onClick: () => void; label: string }) 
         fontSize: 16,
         fontWeight: 600,
         cursor: 'pointer',
+      }}
+    >
+      {label}
+    </button>
+  )
+}
+
+function LinkButton({ onClick, label }: { onClick: () => void; label: string }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        background: 'none',
+        border: 'none',
+        color: 'var(--text-faint)',
+        fontSize: 13,
+        cursor: 'pointer',
+        textDecoration: 'underline',
       }}
     >
       {label}
