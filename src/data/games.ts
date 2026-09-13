@@ -37,7 +37,7 @@ export const games: GameMeta[] = [
     name: 'Perfect Circle',
     tagline: 'Draw a circle freehand. Scored on geometry.',
     category: 'Precision',
-    status: 'soon',
+    status: 'live',
   },
   {
     id: 'center',
