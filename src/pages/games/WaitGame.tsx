@@ -1,28 +1,48 @@
-import { useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { GameShell } from '../../components/GameShell'
+import { GameModeSelect } from '../../components/GameModeSelect'
+import { VsSequencer } from '../../components/VsSequencer'
 import { LocalLeaderboard } from '../../components/LocalLeaderboard'
 import { addRun, getRuns } from '../../lib/leaderboard'
+import {
+  createRunConfig,
+  difficultyForRound,
+  ENDLESS_LIVES,
+  FIXED_ROUNDS,
+  isMiss,
+  markDailyPlayed,
+  rngFor,
+  type RunConfig,
+} from '../../lib/modes'
+import type { Rng } from '../../lib/rng'
 
 const GAME_ID = 'wait'
-const ROUNDS = 5
-
-// Target durations (ms), one per round — a bit of progression, not a strict
-// difficulty curve.
-const TARGETS_MS = [3000, 5000, 4200, 6500, 2800]
 
 type Round = {
   targetMs: number
+  toleranceMs: number
   elapsedMs: number
   diffMs: number
   score: number
 }
 
-function emptyRound(targetMs: number): Round {
-  return { targetMs, elapsedMs: 0, diffMs: 0, score: 0 }
+// t: 0 (easiest) -> 1 (hardest). Harder rounds pick a target from a wider
+// range and round it to an "awkward", more precise value (fewer round
+// numbers to anchor on), and shrink the scoring tolerance.
+function makeTarget(rng: Rng, t: number): { targetMs: number; toleranceMs: number } {
+  const rawMs = 2000 + rng() * 5000
+  const step = 500 - 450 * t // 500ms steps when easy, down to ~50ms when hard
+  const targetMs = Math.round(rawMs / step) * step
+  const toleranceMs = 500 - 250 * t
+  return { targetMs, toleranceMs }
 }
 
-function scoreFor(diffMs: number) {
-  return Math.max(0, Math.min(100, 100 * (1 - diffMs / 500)))
+function emptyRound(targetMs: number, toleranceMs: number): Round {
+  return { targetMs, toleranceMs, elapsedMs: 0, diffMs: 0, score: 0 }
+}
+
+function scoreFor(diffMs: number, toleranceMs: number) {
+  return Math.max(0, Math.min(100, 100 * (1 - diffMs / toleranceMs)))
 }
 
 function formatSeconds(ms: number) {
@@ -30,18 +50,83 @@ function formatSeconds(ms: number) {
 }
 
 export function WaitGame() {
+  const [config, setConfig] = useState<RunConfig | null>(null)
+
+  return (
+    <GameShell eyebrow="Timing" title="Wait">
+      {!config ? (
+        <GameModeSelect gameId={GAME_ID} onStart={setConfig} />
+      ) : config.mode === 'vs' && config.vs ? (
+        <VsSequencer
+          playerCount={config.vs.playerCount}
+          seed={config.seed}
+          onExit={() => setConfig(null)}
+          renderRun={(runConfig, onFinish) => (
+            <WaitRun
+              key={`${runConfig.seed}-${runConfig.vs?.playerIndex ?? 0}`}
+              config={runConfig}
+              onFinish={onFinish}
+              onChangeMode={() => setConfig(null)}
+            />
+          )}
+        />
+      ) : (
+        <WaitRun
+          key={config.seed}
+          config={config}
+          onChangeMode={() => setConfig(null)}
+          onPlayAgain={
+            config.mode === 'daily'
+              ? undefined
+              : () => setConfig(createRunConfig(config.mode, GAME_ID))
+          }
+        />
+      )}
+    </GameShell>
+  )
+}
+
+function modeLabel(config: RunConfig): string {
+  if (config.vs) return `Player ${config.vs.playerIndex + 1} of ${config.vs.playerCount}`
+  if (config.mode === 'daily') return 'Daily challenge'
+  if (config.mode === 'endless') return 'Endless'
+  return 'Practice'
+}
+
+function WaitRun({
+  config,
+  onFinish,
+  onChangeMode,
+  onPlayAgain,
+}: {
+  config: RunConfig
+  onFinish?: (score: number) => void
+  onChangeMode: () => void
+  onPlayAgain?: () => void
+}) {
+  const rng = useMemo(() => rngFor(config), [config])
+  const isEndless = config.mode === 'endless'
+
   const [phase, setPhase] = useState<
     'intro' | 'ready' | 'running' | 'roundResult' | 'done'
   >('intro')
   const [rounds, setRounds] = useState<Round[]>([])
-  const [runs, setRuns] = useState(() => getRuns(GAME_ID, 'daily'))
+  const [lives, setLives] = useState(ENDLESS_LIVES)
+  const [runs, setRuns] = useState(() => getRuns(GAME_ID, config.mode))
   const startRef = useRef<number>(0)
 
   const currentIndex = rounds.length - 1
   const current = rounds[currentIndex]
 
+  function makeRound(roundNum: number): Round {
+    const t = difficultyForRound(roundNum, config.mode)
+    const { targetMs, toleranceMs } = makeTarget(rng, t)
+    return emptyRound(targetMs, toleranceMs)
+  }
+
   function startGame() {
-    setRounds([emptyRound(TARGETS_MS[0])])
+    setRounds([makeRound(1)])
+    setLives(ENDLESS_LIVES)
     setPhase('ready')
   }
 
@@ -54,37 +139,64 @@ export function WaitGame() {
     if (phase !== 'running' || !current) return
     const elapsedMs = performance.now() - startRef.current
     const diffMs = Math.abs(elapsedMs - current.targetMs)
-    const score = scoreFor(diffMs)
+    const score = scoreFor(diffMs, current.toleranceMs)
     setRounds((rs) =>
       rs.map((r, i) => (i === currentIndex ? { ...r, elapsedMs, diffMs, score } : r)),
     )
+    if (isEndless && isMiss(score)) setLives((l) => l - 1)
     setPhase('roundResult')
   }
 
-  function nextRound() {
-    if (rounds.length >= ROUNDS) {
-      const total = rounds.reduce((sum, r) => sum + r.score, 0) / rounds.length
-      const updated = addRun(GAME_ID, 'daily', total)
-      setRuns(updated)
-      setPhase('done')
+  function finish(finalScore: number) {
+    if (onFinish) {
+      onFinish(finalScore)
       return
     }
-    setRounds((rs) => [...rs, emptyRound(TARGETS_MS[rs.length])])
+    if (config.mode === 'daily') markDailyPlayed(GAME_ID, finalScore)
+    if (config.mode !== 'practice') setRuns(addRun(GAME_ID, config.mode, finalScore))
+    setPhase('done')
+  }
+
+  function nextRound() {
+    if (isEndless) {
+      if (lives <= 0) {
+        finish(rounds.length)
+        return
+      }
+      setRounds((rs) => [...rs, makeRound(rs.length + 1)])
+      setPhase('ready')
+      return
+    }
+    if (rounds.length >= FIXED_ROUNDS) {
+      finish(rounds.reduce((s, r) => s + r.score, 0) / rounds.length)
+      return
+    }
+    setRounds((rs) => [...rs, makeRound(rs.length + 1)])
     setPhase('ready')
   }
 
-  function playAgain() {
-    setRounds([])
-    setPhase('intro')
-  }
+  const isRunOver = isEndless ? lives <= 0 : rounds.length >= FIXED_ROUNDS
 
   return (
-    <GameShell eyebrow="Timing" title="Wait">
+    <div>
       {phase === 'intro' && (
         <div style={{ textAlign: 'center' }}>
+          <div
+            style={{
+              fontSize: 13,
+              fontWeight: 600,
+              color: 'var(--text-faint)',
+              textTransform: 'uppercase',
+              marginBottom: 8,
+            }}
+          >
+            {modeLabel(config)}
+          </div>
           <p style={{ color: 'var(--text-dim)', maxWidth: 420, margin: '0 auto 28px' }}>
-            Stop the timer on the exact target. {ROUNDS} rounds, scored by how
-            close you land.
+            Stop the timer on the exact target.{' '}
+            {isEndless
+              ? `${ENDLESS_LIVES} lives — it gets harder the longer you survive.`
+              : `${FIXED_ROUNDS} rounds, scored by how close you land.`}
           </p>
           <PlayButton onClick={startGame} label="Start" />
         </div>
@@ -93,7 +205,11 @@ export function WaitGame() {
       {(phase === 'ready' || phase === 'running' || phase === 'roundResult') &&
         current && (
           <div>
-            <RoundProgress index={currentIndex} total={ROUNDS} />
+            {isEndless ? (
+              <EndlessHud round={rounds.length} lives={lives} />
+            ) : (
+              <RoundProgress index={currentIndex} total={FIXED_ROUNDS} />
+            )}
 
             <div style={{ textAlign: 'center' }}>
               <div style={{ fontSize: 13, color: 'var(--text-faint)' }}>TARGET</div>
@@ -146,7 +262,7 @@ export function WaitGame() {
                   </div>
                   <PlayButton
                     onClick={nextRound}
-                    label={rounds.length >= ROUNDS ? 'See results' : 'Next round'}
+                    label={isRunOver ? 'See results' : 'Next round'}
                   />
                 </>
               )}
@@ -156,47 +272,60 @@ export function WaitGame() {
 
       {phase === 'done' && (
         <div>
-          <div
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 8,
-              marginBottom: 20,
-            }}
-          >
-            {rounds.map((r, i) => (
-              <div
-                key={i}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  fontSize: 14,
-                  color: 'var(--text-dim)',
-                }}
-              >
-                <span>Round {i + 1}</span>
-                <span>{formatSeconds(r.targetMs)} target</span>
-                <span>{r.diffMs.toFixed(0)}ms off</span>
-                <span style={{ fontWeight: 600, color: 'var(--text)' }}>
-                  {r.score.toFixed(1)}
-                </span>
-              </div>
-            ))}
-          </div>
+          {!isEndless && (
+            <div
+              style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 20 }}
+            >
+              {rounds.map((r, i) => (
+                <div
+                  key={i}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    fontSize: 14,
+                    color: 'var(--text-dim)',
+                  }}
+                >
+                  <span>Round {i + 1}</span>
+                  <span>{formatSeconds(r.targetMs)} target</span>
+                  <span>{r.diffMs.toFixed(0)}ms off</span>
+                  <span style={{ fontWeight: 600, color: 'var(--text)' }}>
+                    {r.score.toFixed(1)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
           <div style={{ textAlign: 'center' }}>
             <div style={{ fontSize: 13, color: 'var(--text-faint)' }}>
-              AVERAGE SCORE
+              {isEndless ? 'ROUNDS SURVIVED' : 'AVERAGE SCORE'}
             </div>
             <div style={{ fontSize: 44, fontWeight: 700, margin: '4px 0 24px' }}>
-              {(rounds.reduce((s, r) => s + r.score, 0) / rounds.length).toFixed(1)}
+              {isEndless
+                ? rounds.length
+                : (rounds.reduce((s, r) => s + r.score, 0) / rounds.length).toFixed(1)}
             </div>
-            <PlayButton onClick={playAgain} label="Play again" />
+            {onPlayAgain ? (
+              <PlayButton onClick={onPlayAgain} label="Play again" />
+            ) : (
+              <div style={{ color: 'var(--text-dim)', fontSize: 14 }}>
+                Come back tomorrow for a new Daily.
+              </div>
+            )}
           </div>
-          <LocalLeaderboard runs={runs} />
+          <div style={{ textAlign: 'center', marginTop: 16 }}>
+            <LinkButton onClick={onChangeMode} label="Change mode" />
+          </div>
+          {config.mode !== 'practice' && (
+            <LocalLeaderboard
+              runs={runs}
+              formatScore={isEndless ? (s) => `${s.toFixed(0)} rounds` : undefined}
+            />
+          )}
         </div>
       )}
-    </GameShell>
+    </div>
   )
 }
 
@@ -221,6 +350,37 @@ function RoundProgress({ index, total }: { index: number; total: number }) {
           }}
         />
       ))}
+    </div>
+  )
+}
+
+function EndlessHud({ round, lives }: { round: number; lives: number }) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 16,
+        marginBottom: 16,
+        fontSize: 13,
+        color: 'var(--text-dim)',
+      }}
+    >
+      <span>Round {round}</span>
+      <span style={{ display: 'flex', gap: 4 }}>
+        {Array.from({ length: ENDLESS_LIVES }).map((_, i) => (
+          <span
+            key={i}
+            style={{
+              width: 8,
+              height: 8,
+              borderRadius: '50%',
+              background: i < lives ? 'var(--danger)' : 'var(--border)',
+            }}
+          />
+        ))}
+      </span>
     </div>
   )
 }
@@ -260,6 +420,24 @@ function PlayButton({ onClick, label }: { onClick: () => void; label: string }) 
         fontSize: 16,
         fontWeight: 600,
         cursor: 'pointer',
+      }}
+    >
+      {label}
+    </button>
+  )
+}
+
+function LinkButton({ onClick, label }: { onClick: () => void; label: string }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        background: 'none',
+        border: 'none',
+        color: 'var(--text-faint)',
+        fontSize: 13,
+        cursor: 'pointer',
+        textDecoration: 'underline',
       }}
     >
       {label}
