@@ -1,13 +1,23 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { GameShell } from '../../components/GameShell'
+import { GameModeSelect } from '../../components/GameModeSelect'
+import { VsSequencer } from '../../components/VsSequencer'
 import { LocalLeaderboard } from '../../components/LocalLeaderboard'
 import { addRun, getRuns } from '../../lib/leaderboard'
+import {
+  createRunConfig,
+  difficultyForRound,
+  ENDLESS_LIVES,
+  FIXED_ROUNDS,
+  isMiss,
+  markDailyPlayed,
+  rngFor,
+  type RunConfig,
+} from '../../lib/modes'
+import type { Rng } from '../../lib/rng'
 
 const GAME_ID = 'swap'
-const ROUNDS = 5
 const SLOT_COUNT = 5
-const REVEAL_MS = 900
-const SWAP_STEP_MS = 550
 const SETTLE_MS = 500
 
 // Slots are fixed percentage coordinates arranged in a gentle arc, so the
@@ -35,14 +45,16 @@ type Round = {
   correctSlot: number
   guessSlot: number | null
   score: number
+  revealMs: number
+  swapStepMs: number
 }
 
-function randomSwapPair(prev: [number, number] | null): [number, number] {
+function randomSwapPair(rng: Rng, prev: [number, number] | null): [number, number] {
   let a = 0
   let b = 0
   do {
-    a = Math.floor(Math.random() * SLOT_COUNT)
-    b = Math.floor(Math.random() * SLOT_COUNT)
+    a = Math.floor(rng() * SLOT_COUNT)
+    b = Math.floor(rng() * SLOT_COUNT)
   } while (
     a === b ||
     (prev && ((a === prev[0] && b === prev[1]) || (a === prev[1] && b === prev[0])))
@@ -50,12 +62,13 @@ function randomSwapPair(prev: [number, number] | null): [number, number] {
   return [a, b]
 }
 
-function generateSwaps(): [number, number][] {
-  const count = 4 + Math.floor(Math.random() * 3) // 4-6
+// t: 0 (easiest) -> 1 (hardest). Harder rounds chain together more swaps.
+function generateSwaps(rng: Rng, t: number): [number, number][] {
+  const count = Math.round(4 + 5 * t) // 4 at t=0 -> 9 at t=1
   const swaps: [number, number][] = []
   let prev: [number, number] | null = null
   for (let i = 0; i < count; i++) {
-    const pair = randomSwapPair(prev)
+    const pair = randomSwapPair(rng, prev)
     swaps.push(pair)
     prev = pair
   }
@@ -78,29 +91,101 @@ function finalTokenSlots(swaps: [number, number][]): number[] {
   return tokenSlot
 }
 
-function makeRound(): Round {
-  const swaps = generateSwaps()
-  const targetTokenId = Math.floor(Math.random() * SLOT_COUNT)
+function makeRound(rng: Rng, roundNum: number, mode: RunConfig['mode']): Round {
+  const t = difficultyForRound(roundNum, mode)
+  const swaps = generateSwaps(rng, t)
+  const targetTokenId = Math.floor(rng() * SLOT_COUNT)
   const correctSlot = finalTokenSlots(swaps)[targetTokenId]
-  return { targetTokenId, swaps, correctSlot, guessSlot: null, score: 0 }
+  // Reveal shortens with difficulty but never drops below ~500ms — even at
+  // max difficulty the target highlight must stay legible.
+  const revealMs = Math.max(500, 900 - 400 * t)
+  // Each swap step animates faster as difficulty rises.
+  const swapStepMs = 550 - 270 * t
+  return {
+    targetTokenId,
+    swaps,
+    correctSlot,
+    guessSlot: null,
+    score: 0,
+    revealMs,
+    swapStepMs,
+  }
 }
 
 export function SwapGame() {
+  const [config, setConfig] = useState<RunConfig | null>(null)
+
+  return (
+    <GameShell eyebrow="Memory" title="Swap">
+      {!config ? (
+        <GameModeSelect gameId={GAME_ID} onStart={setConfig} />
+      ) : config.mode === 'vs' && config.vs ? (
+        <VsSequencer
+          playerCount={config.vs.playerCount}
+          seed={config.seed}
+          onExit={() => setConfig(null)}
+          renderRun={(runConfig, onFinish) => (
+            <SwapRun
+              key={`${runConfig.seed}-${runConfig.vs?.playerIndex ?? 0}`}
+              config={runConfig}
+              onFinish={onFinish}
+              onChangeMode={() => setConfig(null)}
+            />
+          )}
+        />
+      ) : (
+        <SwapRun
+          key={config.seed}
+          config={config}
+          onChangeMode={() => setConfig(null)}
+          onPlayAgain={
+            config.mode === 'daily'
+              ? undefined
+              : () => setConfig(createRunConfig(config.mode, GAME_ID))
+          }
+        />
+      )}
+    </GameShell>
+  )
+}
+
+function modeLabel(config: RunConfig): string {
+  if (config.vs) return `Player ${config.vs.playerIndex + 1} of ${config.vs.playerCount}`
+  if (config.mode === 'daily') return 'Daily challenge'
+  if (config.mode === 'endless') return 'Endless'
+  return 'Practice'
+}
+
+function SwapRun({
+  config,
+  onFinish,
+  onChangeMode,
+  onPlayAgain,
+}: {
+  config: RunConfig
+  onFinish?: (score: number) => void
+  onChangeMode: () => void
+  onPlayAgain?: () => void
+}) {
+  const rng = useMemo(() => rngFor(config), [config])
+  const isEndless = config.mode === 'endless'
+
   const [phase, setPhase] = useState<Phase>('intro')
   const [rounds, setRounds] = useState<Round[]>([])
   const [liveTokenSlot, setLiveTokenSlot] = useState<number[]>([0, 1, 2, 3, 4])
   const [highlightOn, setHighlightOn] = useState(false)
-  const [runs, setRuns] = useState(() => getRuns(GAME_ID, 'daily'))
+  const [lives, setLives] = useState(ENDLESS_LIVES)
+  const [runs, setRuns] = useState(() => getRuns(GAME_ID, config.mode))
 
   const currentIndex = rounds.length - 1
   const current = rounds[currentIndex]
 
   // Phase 1: show the target token, stationary, for a beat.
   useEffect(() => {
-    if (phase !== 'revealTarget') return
-    const t = setTimeout(() => setPhase('swapping'), REVEAL_MS)
+    if (phase !== 'revealTarget' || !current) return
+    const t = setTimeout(() => setPhase('swapping'), current.revealMs)
     return () => clearTimeout(t)
-  }, [phase])
+  }, [phase, current])
 
   // Phase 2: replay the swap sequence step by step, then hide the
   // highlight and hand control to the player.
@@ -118,7 +203,7 @@ export function SwapGame() {
           next[tokenAtB] = a
           return next
         })
-      }, i * SWAP_STEP_MS)
+      }, i * current.swapStepMs)
       timeouts.push(t)
     })
 
@@ -127,7 +212,7 @@ export function SwapGame() {
         setHighlightOn(false)
         setPhase('guessing')
       },
-      current.swaps.length * SWAP_STEP_MS + SETTLE_MS,
+      current.swaps.length * current.swapStepMs + SETTLE_MS,
     )
     timeouts.push(finalTimeout)
 
@@ -136,9 +221,10 @@ export function SwapGame() {
   }, [phase, currentIndex])
 
   function startGame() {
-    setRounds([makeRound()])
+    setRounds([makeRound(rng, 1, config.mode)])
     setLiveTokenSlot([0, 1, 2, 3, 4])
     setHighlightOn(true)
+    setLives(ENDLESS_LIVES)
     setPhase('revealTarget')
   }
 
@@ -146,39 +232,66 @@ export function SwapGame() {
     if (phase !== 'guessing' || !current || current.guessSlot !== null) return
     const score = slotIndex === current.correctSlot ? 100 : 0
     setRounds((rs) =>
-      rs.map((r, i) =>
-        i === currentIndex ? { ...r, guessSlot: slotIndex, score } : r,
-      ),
+      rs.map((r, i) => (i === currentIndex ? { ...r, guessSlot: slotIndex, score } : r)),
     )
+    if (isEndless && isMiss(score)) setLives((l) => l - 1)
     setPhase('roundResult')
   }
 
-  function nextRound() {
-    if (rounds.length >= ROUNDS) {
-      const total = rounds.reduce((sum, r) => sum + r.score, 0) / rounds.length
-      const updated = addRun(GAME_ID, 'daily', total)
-      setRuns(updated)
-      setPhase('done')
+  function finish(finalScore: number) {
+    if (onFinish) {
+      onFinish(finalScore)
       return
     }
-    setRounds((rs) => [...rs, makeRound()])
+    if (config.mode === 'daily') markDailyPlayed(GAME_ID, finalScore)
+    if (config.mode !== 'practice') setRuns(addRun(GAME_ID, config.mode, finalScore))
+    setPhase('done')
+  }
+
+  function nextRound() {
+    if (isEndless) {
+      if (lives <= 0) {
+        finish(rounds.length)
+        return
+      }
+      setRounds((rs) => [...rs, makeRound(rng, rs.length + 1, config.mode)])
+      setLiveTokenSlot([0, 1, 2, 3, 4])
+      setHighlightOn(true)
+      setPhase('revealTarget')
+      return
+    }
+    if (rounds.length >= FIXED_ROUNDS) {
+      finish(rounds.reduce((s, r) => s + r.score, 0) / rounds.length)
+      return
+    }
+    setRounds((rs) => [...rs, makeRound(rng, rs.length + 1, config.mode)])
     setLiveTokenSlot([0, 1, 2, 3, 4])
     setHighlightOn(true)
     setPhase('revealTarget')
   }
 
-  function playAgain() {
-    setRounds([])
-    setPhase('intro')
-  }
+  const isRunOver = isEndless ? lives <= 0 : rounds.length >= FIXED_ROUNDS
 
   return (
-    <GameShell eyebrow="Memory" title="Swap">
+    <div>
       {phase === 'intro' && (
         <div style={{ textAlign: 'center' }}>
+          <div
+            style={{
+              fontSize: 13,
+              fontWeight: 600,
+              color: 'var(--text-faint)',
+              textTransform: 'uppercase',
+              marginBottom: 8,
+            }}
+          >
+            {modeLabel(config)}
+          </div>
           <p style={{ color: 'var(--text-dim)', maxWidth: 420, margin: '0 auto 28px' }}>
-            One token lights up, then everything shuffles. Click the slot it
-            ended up in. {ROUNDS} rounds.
+            One token lights up, then everything shuffles. Click the slot it ended up in.{' '}
+            {isEndless
+              ? `${ENDLESS_LIVES} lives — it gets harder the longer you survive.`
+              : `${FIXED_ROUNDS} rounds, and it gets harder each round.`}
           </p>
           <PlayButton onClick={startGame} label="Start" />
         </div>
@@ -186,7 +299,11 @@ export function SwapGame() {
 
       {phase !== 'intro' && phase !== 'done' && current && (
         <div>
-          <RoundProgress index={currentIndex} total={ROUNDS} />
+          {isEndless ? (
+            <EndlessHud round={rounds.length} lives={lives} />
+          ) : (
+            <RoundProgress index={currentIndex} total={FIXED_ROUNDS} />
+          )}
 
           <div style={{ height: 22, textAlign: 'center', marginBottom: 8 }}>
             {phase === 'guessing' && (
@@ -267,7 +384,7 @@ export function SwapGame() {
                         ? 'var(--accent)'
                         : 'var(--text-dim)',
                     pointerEvents: 'none',
-                    transition: `left ${SWAP_STEP_MS}ms ease, top ${SWAP_STEP_MS}ms ease, background 0.2s ease`,
+                    transition: `left ${current.swapStepMs}ms ease, top ${current.swapStepMs}ms ease, background 0.2s ease`,
                   }}
                 />
               )
@@ -285,7 +402,7 @@ export function SwapGame() {
               </div>
               <PlayButton
                 onClick={nextRound}
-                label={rounds.length >= ROUNDS ? 'See results' : 'Next round'}
+                label={isRunOver ? 'See results' : 'Next round'}
               />
             </div>
           )}
@@ -294,46 +411,59 @@ export function SwapGame() {
 
       {phase === 'done' && (
         <div>
-          <div
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 8,
-              marginBottom: 20,
-            }}
-          >
-            {rounds.map((r, i) => (
-              <div
-                key={i}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  fontSize: 14,
-                  color: 'var(--text-dim)',
-                }}
-              >
-                <span>Round {i + 1}</span>
-                <span>{r.score === 100 ? 'Correct' : 'Missed'}</span>
-                <span style={{ fontWeight: 600, color: 'var(--text)' }}>
-                  {r.score.toFixed(0)}
-                </span>
-              </div>
-            ))}
-          </div>
+          {!isEndless && (
+            <div
+              style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 20 }}
+            >
+              {rounds.map((r, i) => (
+                <div
+                  key={i}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    fontSize: 14,
+                    color: 'var(--text-dim)',
+                  }}
+                >
+                  <span>Round {i + 1}</span>
+                  <span>{r.score === 100 ? 'Correct' : 'Missed'}</span>
+                  <span style={{ fontWeight: 600, color: 'var(--text)' }}>
+                    {r.score.toFixed(0)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
           <div style={{ textAlign: 'center' }}>
             <div style={{ fontSize: 13, color: 'var(--text-faint)' }}>
-              AVERAGE SCORE
+              {isEndless ? 'ROUNDS SURVIVED' : 'AVERAGE SCORE'}
             </div>
             <div style={{ fontSize: 44, fontWeight: 700, margin: '4px 0 24px' }}>
-              {(rounds.reduce((s, r) => s + r.score, 0) / rounds.length).toFixed(1)}
+              {isEndless
+                ? rounds.length
+                : (rounds.reduce((s, r) => s + r.score, 0) / rounds.length).toFixed(1)}
             </div>
-            <PlayButton onClick={playAgain} label="Play again" />
+            {onPlayAgain ? (
+              <PlayButton onClick={onPlayAgain} label="Play again" />
+            ) : (
+              <div style={{ color: 'var(--text-dim)', fontSize: 14 }}>
+                Come back tomorrow for a new Daily.
+              </div>
+            )}
           </div>
-          <LocalLeaderboard runs={runs} />
+          <div style={{ textAlign: 'center', marginTop: 16 }}>
+            <LinkButton onClick={onChangeMode} label="Change mode" />
+          </div>
+          {config.mode !== 'practice' && (
+            <LocalLeaderboard
+              runs={runs}
+              formatScore={isEndless ? (s) => `${s.toFixed(0)} rounds` : undefined}
+            />
+          )}
         </div>
       )}
-    </GameShell>
+    </div>
   )
 }
 
@@ -362,6 +492,37 @@ function RoundProgress({ index, total }: { index: number; total: number }) {
   )
 }
 
+function EndlessHud({ round, lives }: { round: number; lives: number }) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 16,
+        marginBottom: 16,
+        fontSize: 13,
+        color: 'var(--text-dim)',
+      }}
+    >
+      <span>Round {round}</span>
+      <span style={{ display: 'flex', gap: 4 }}>
+        {Array.from({ length: ENDLESS_LIVES }).map((_, i) => (
+          <span
+            key={i}
+            style={{
+              width: 8,
+              height: 8,
+              borderRadius: '50%',
+              background: i < lives ? 'var(--danger)' : 'var(--border)',
+            }}
+          />
+        ))}
+      </span>
+    </div>
+  )
+}
+
 function PlayButton({ onClick, label }: { onClick: () => void; label: string }) {
   return (
     <button
@@ -375,6 +536,24 @@ function PlayButton({ onClick, label }: { onClick: () => void; label: string }) 
         fontSize: 16,
         fontWeight: 600,
         cursor: 'pointer',
+      }}
+    >
+      {label}
+    </button>
+  )
+}
+
+function LinkButton({ onClick, label }: { onClick: () => void; label: string }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        background: 'none',
+        border: 'none',
+        color: 'var(--text-faint)',
+        fontSize: 13,
+        cursor: 'pointer',
+        textDecoration: 'underline',
       }}
     >
       {label}
