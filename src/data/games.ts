@@ -65,7 +65,7 @@ export const games: GameMeta[] = [
     name: 'Crowd',
     tagline: 'Track one dot through a moving crowd.',
     category: 'Perception',
-    status: 'soon',
+    status: 'live',
   },
   {
     id: 'blink',
