@@ -1,13 +1,35 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { GameShell } from '../../components/GameShell'
+import { GameModeSelect } from '../../components/GameModeSelect'
+import { VsSequencer } from '../../components/VsSequencer'
 import { LocalLeaderboard } from '../../components/LocalLeaderboard'
 import { addRun, getRuns } from '../../lib/leaderboard'
+import {
+  createRunConfig,
+  difficultyForRound,
+  ENDLESS_LIVES,
+  FIXED_ROUNDS,
+  isMiss,
+  markDailyPlayed,
+  rngFor,
+  type RunConfig,
+} from '../../lib/modes'
+import type { Rng } from '../../lib/rng'
 
 const GAME_ID = 'predict'
-const ROUNDS = 5
-// Fixed prediction horizon: how far past the visible window the dot
-// keeps travelling (invisibly) before the target moment we score against.
-const HORIZON_SECONDS = 1.1
+
+// Prediction horizon: how far past the visible window the dot keeps
+// travelling (invisibly) before the target moment we score against.
+// Scales with difficulty t (0 -> 1): a further-out target is harder to
+// extrapolate to.
+const HORIZON_BASE_SECONDS = 0.9
+const HORIZON_RANGE_SECONDS = 0.9
+
+// Minimum start->truePoint distance also scales with t: a longer
+// trajectory over roughly the same window means a faster-moving dot,
+// which is harder to track and extrapolate.
+const MIN_DIST_BASE = 28
+const MIN_DIST_RANGE = 47
 
 // All positions/velocities live in percentage-space (0-100), so a round
 // can be generated before the board exists (e.g. on the intro screen)
@@ -31,10 +53,10 @@ function dist(a: Point, b: Point) {
   return Math.hypot(a.x - b.x, a.y - b.y)
 }
 
-function randomPoint(margin: number): Point {
+function randomPoint(rng: Rng, margin: number): Point {
   return {
-    x: margin + Math.random() * (100 - margin * 2),
-    y: margin + Math.random() * (100 - margin * 2),
+    x: margin + rng() * (100 - margin * 2),
+    y: margin + rng() * (100 - margin * 2),
   }
 }
 
@@ -42,19 +64,21 @@ function randomPoint(margin: number): Point {
 // board) never leaves that region, so picking both the start and the
 // eventual true point at random inside a margin guarantees the whole
 // trajectory — visible and hidden portions alike — stays on-board.
-// Distance between them (and therefore speed, since duration is fixed
-// per round) grows with round index for a light difficulty ramp.
-function makeRound(roundIndex: number): Round {
+// Distance between them (and therefore speed, since duration is mostly
+// fixed per round) grows with difficulty t for a consistent ramp.
+function makeRound(rng: Rng, roundNum: number, mode: RunConfig['mode']): Round {
+  const t = difficultyForRound(roundNum, mode)
   const margin = 12
-  const visibleDuration = 1.5 + Math.random() * 0.5
-  const totalTime = visibleDuration + HORIZON_SECONDS
+  const visibleDuration = 1.5 + rng() * 0.5
+  const horizon = HORIZON_BASE_SECONDS + t * HORIZON_RANGE_SECONDS
+  const totalTime = visibleDuration + horizon
 
-  const start = randomPoint(margin)
-  const minDist = 35 + roundIndex * 6
-  let truePoint = randomPoint(margin)
+  const start = randomPoint(rng, margin)
+  const minDist = MIN_DIST_BASE + t * MIN_DIST_RANGE
+  let truePoint = randomPoint(rng, margin)
   let attempts = 0
   while (dist(start, truePoint) < minDist && attempts < 20) {
-    truePoint = randomPoint(margin)
+    truePoint = randomPoint(rng, margin)
     attempts++
   }
 
@@ -80,11 +104,69 @@ function makeRound(roundIndex: number): Round {
 }
 
 export function PredictGame() {
+  const [config, setConfig] = useState<RunConfig | null>(null)
+
+  return (
+    <GameShell eyebrow="Timing" title="Predict">
+      {!config ? (
+        <GameModeSelect gameId={GAME_ID} onStart={setConfig} />
+      ) : config.mode === 'vs' && config.vs ? (
+        <VsSequencer
+          playerCount={config.vs.playerCount}
+          seed={config.seed}
+          onExit={() => setConfig(null)}
+          renderRun={(runConfig, onFinish) => (
+            <PredictRun
+              key={`${runConfig.seed}-${runConfig.vs?.playerIndex ?? 0}`}
+              config={runConfig}
+              onFinish={onFinish}
+              onChangeMode={() => setConfig(null)}
+            />
+          )}
+        />
+      ) : (
+        <PredictRun
+          key={config.seed}
+          config={config}
+          onChangeMode={() => setConfig(null)}
+          onPlayAgain={
+            config.mode === 'daily'
+              ? undefined
+              : () => setConfig(createRunConfig(config.mode, GAME_ID))
+          }
+        />
+      )}
+    </GameShell>
+  )
+}
+
+function modeLabel(config: RunConfig): string {
+  if (config.vs) return `Player ${config.vs.playerIndex + 1} of ${config.vs.playerCount}`
+  if (config.mode === 'daily') return 'Daily challenge'
+  if (config.mode === 'endless') return 'Endless'
+  return 'Practice'
+}
+
+function PredictRun({
+  config,
+  onFinish,
+  onChangeMode,
+  onPlayAgain,
+}: {
+  config: RunConfig
+  onFinish?: (score: number) => void
+  onChangeMode: () => void
+  onPlayAgain?: () => void
+}) {
+  const rng = useMemo(() => rngFor(config), [config])
+  const isEndless = config.mode === 'endless'
+
   const [phase, setPhase] = useState<'intro' | 'playing' | 'roundResult' | 'done'>(
     'intro',
   )
   const [rounds, setRounds] = useState<Round[]>([])
-  const [runs, setRuns] = useState(() => getRuns(GAME_ID, 'daily'))
+  const [lives, setLives] = useState(ENDLESS_LIVES)
+  const [runs, setRuns] = useState(() => getRuns(GAME_ID, config.mode))
   const [pos, setPos] = useState<Point>({ x: 50, y: 50 })
   const [dotVisible, setDotVisible] = useState(false)
   const [canGuess, setCanGuess] = useState(false)
@@ -131,7 +213,8 @@ export function PredictGame() {
   }, [phase, currentIndex])
 
   function startGame() {
-    setRounds([makeRound(0)])
+    setRounds([makeRound(rng, 1, config.mode)])
+    setLives(ENDLESS_LIVES)
     setPhase('playing')
   }
 
@@ -154,34 +237,62 @@ export function PredictGame() {
         i === currentIndex ? { ...r, guess, distance: distPx, score } : r,
       ),
     )
+    if (isEndless && isMiss(score)) setLives((l) => l - 1)
     setCanGuess(false)
     setPhase('roundResult')
   }
 
-  function nextRound() {
-    if (rounds.length >= ROUNDS) {
-      const total = rounds.reduce((sum, r) => sum + r.score, 0) / rounds.length
-      const updated = addRun(GAME_ID, 'daily', total)
-      setRuns(updated)
-      setPhase('done')
+  function finish(finalScore: number) {
+    if (onFinish) {
+      onFinish(finalScore)
       return
     }
-    setRounds((rs) => [...rs, makeRound(rs.length)])
+    if (config.mode === 'daily') markDailyPlayed(GAME_ID, finalScore)
+    if (config.mode !== 'practice') setRuns(addRun(GAME_ID, config.mode, finalScore))
+    setPhase('done')
+  }
+
+  function nextRound() {
+    if (isEndless) {
+      if (lives <= 0) {
+        finish(rounds.length)
+        return
+      }
+      setRounds((rs) => [...rs, makeRound(rng, rs.length + 1, config.mode)])
+      setPhase('playing')
+      return
+    }
+    if (rounds.length >= FIXED_ROUNDS) {
+      finish(rounds.reduce((sum, r) => sum + r.score, 0) / rounds.length)
+      return
+    }
+    setRounds((rs) => [...rs, makeRound(rng, rs.length + 1, config.mode)])
     setPhase('playing')
   }
 
-  function playAgain() {
-    setRounds([])
-    setPhase('intro')
-  }
+  const isRunOver = isEndless ? lives <= 0 : rounds.length >= FIXED_ROUNDS
 
   return (
-    <GameShell eyebrow="Timing" title="Predict">
+    <div>
       {phase === 'intro' && (
         <div style={{ textAlign: 'center' }}>
+          <div
+            style={{
+              fontSize: 13,
+              fontWeight: 600,
+              color: 'var(--text-faint)',
+              textTransform: 'uppercase',
+              marginBottom: 8,
+            }}
+          >
+            {modeLabel(config)}
+          </div>
           <p style={{ color: 'var(--text-dim)', maxWidth: 420, margin: '0 auto 28px' }}>
             Watch the dot move, then click where it would be a moment after it
-            vanishes. {ROUNDS} rounds, scored by how close you land.
+            vanishes.{' '}
+            {isEndless
+              ? `${ENDLESS_LIVES} lives — it gets harder the longer you survive.`
+              : `${FIXED_ROUNDS} rounds, scored by how close you land.`}
           </p>
           <PlayButton onClick={startGame} label="Start" />
         </div>
@@ -189,7 +300,11 @@ export function PredictGame() {
 
       {(phase === 'playing' || phase === 'roundResult') && current && (
         <div>
-          <RoundProgress index={currentIndex} total={ROUNDS} />
+          {isEndless ? (
+            <EndlessHud round={rounds.length} lives={lives} />
+          ) : (
+            <RoundProgress index={currentIndex} total={FIXED_ROUNDS} />
+          )}
           <div
             onClick={handleStageClick}
             style={{
@@ -266,7 +381,7 @@ export function PredictGame() {
               </div>
               <PlayButton
                 onClick={nextRound}
-                label={rounds.length >= ROUNDS ? 'See results' : 'Next round'}
+                label={isRunOver ? 'See results' : 'Next round'}
               />
             </div>
           )}
@@ -275,46 +390,59 @@ export function PredictGame() {
 
       {phase === 'done' && (
         <div>
-          <div
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 8,
-              marginBottom: 20,
-            }}
-          >
-            {rounds.map((r, i) => (
-              <div
-                key={i}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  fontSize: 14,
-                  color: 'var(--text-dim)',
-                }}
-              >
-                <span>Round {i + 1}</span>
-                <span>{r.distance.toFixed(0)}px off</span>
-                <span style={{ fontWeight: 600, color: 'var(--text)' }}>
-                  {r.score.toFixed(1)}
-                </span>
-              </div>
-            ))}
-          </div>
+          {!isEndless && (
+            <div
+              style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 20 }}
+            >
+              {rounds.map((r, i) => (
+                <div
+                  key={i}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    fontSize: 14,
+                    color: 'var(--text-dim)',
+                  }}
+                >
+                  <span>Round {i + 1}</span>
+                  <span>{r.distance.toFixed(0)}px off</span>
+                  <span style={{ fontWeight: 600, color: 'var(--text)' }}>
+                    {r.score.toFixed(1)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
           <div style={{ textAlign: 'center' }}>
             <div style={{ fontSize: 13, color: 'var(--text-faint)' }}>
-              AVERAGE SCORE
+              {isEndless ? 'ROUNDS SURVIVED' : 'AVERAGE SCORE'}
             </div>
             <div style={{ fontSize: 44, fontWeight: 700, margin: '4px 0 24px' }}>
-              {(rounds.reduce((s, r) => s + r.score, 0) / rounds.length).toFixed(1)}
+              {isEndless
+                ? rounds.length
+                : (rounds.reduce((s, r) => s + r.score, 0) / rounds.length).toFixed(1)}
             </div>
-            <PlayButton onClick={playAgain} label="Play again" />
+            {onPlayAgain ? (
+              <PlayButton onClick={onPlayAgain} label="Play again" />
+            ) : (
+              <div style={{ color: 'var(--text-dim)', fontSize: 14 }}>
+                Come back tomorrow for a new Daily.
+              </div>
+            )}
           </div>
-          <LocalLeaderboard runs={runs} />
+          <div style={{ textAlign: 'center', marginTop: 16 }}>
+            <LinkButton onClick={onChangeMode} label="Change mode" />
+          </div>
+          {config.mode !== 'practice' && (
+            <LocalLeaderboard
+              runs={runs}
+              formatScore={isEndless ? (s) => `${s.toFixed(0)} rounds` : undefined}
+            />
+          )}
         </div>
       )}
-    </GameShell>
+    </div>
   )
 }
 
@@ -339,6 +467,37 @@ function RoundProgress({ index, total }: { index: number; total: number }) {
           }}
         />
       ))}
+    </div>
+  )
+}
+
+function EndlessHud({ round, lives }: { round: number; lives: number }) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 16,
+        marginBottom: 16,
+        fontSize: 13,
+        color: 'var(--text-dim)',
+      }}
+    >
+      <span>Round {round}</span>
+      <span style={{ display: 'flex', gap: 4 }}>
+        {Array.from({ length: ENDLESS_LIVES }).map((_, i) => (
+          <span
+            key={i}
+            style={{
+              width: 8,
+              height: 8,
+              borderRadius: '50%',
+              background: i < lives ? 'var(--danger)' : 'var(--border)',
+            }}
+          />
+        ))}
+      </span>
     </div>
   )
 }
@@ -383,6 +542,24 @@ function PlayButton({ onClick, label }: { onClick: () => void; label: string }) 
         fontSize: 16,
         fontWeight: 600,
         cursor: 'pointer',
+      }}
+    >
+      {label}
+    </button>
+  )
+}
+
+function LinkButton({ onClick, label }: { onClick: () => void; label: string }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        background: 'none',
+        border: 'none',
+        color: 'var(--text-faint)',
+        fontSize: 13,
+        cursor: 'pointer',
+        textDecoration: 'underline',
       }}
     >
       {label}
