@@ -72,7 +72,7 @@ export const games: GameMeta[] = [
     name: 'Blink',
     tagline: 'Spot what changed between two flashes.',
     category: 'Perception',
-    status: 'soon',
+    status: 'live',
   },
   {
     id: 'count',
