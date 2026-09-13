@@ -16,7 +16,7 @@ export const games: GameMeta[] = [
     name: 'Trace',
     tagline: 'Watch a path, then redraw it from memory.',
     category: 'Memory',
-    status: 'soon',
+    status: 'live',
   },
   {
     id: 'swap',
