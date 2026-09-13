@@ -4,6 +4,7 @@ import { Home } from './pages/Home'
 import { CenterGame } from './pages/games/CenterGame'
 import { WaitGame } from './pages/games/WaitGame'
 import { GuessDistanceGame } from './pages/games/GuessDistanceGame'
+import { BlinkGame } from './pages/games/BlinkGame'
 import { NotFound } from './pages/NotFound'
 
 export function App() {
@@ -15,6 +16,7 @@ export function App() {
           <Route path="/center" element={<CenterGame />} />
           <Route path="/wait" element={<WaitGame />} />
           <Route path="/guess-distance" element={<GuessDistanceGame />} />
+          <Route path="/blink" element={<BlinkGame />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </HashRouter>
