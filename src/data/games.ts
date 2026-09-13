@@ -79,7 +79,7 @@ export const games: GameMeta[] = [
     name: 'Count',
     tagline: 'A crowd of objects flashes by. How many?',
     category: 'Perception',
-    status: 'soon',
+    status: 'live',
   },
 ]
 
