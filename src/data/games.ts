@@ -51,7 +51,7 @@ export const games: GameMeta[] = [
     name: 'Wait',
     tagline: 'Stop the timer on an exact target.',
     category: 'Timing',
-    status: 'soon',
+    status: 'live',
   },
   {
     id: 'predict',
