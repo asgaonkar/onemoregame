@@ -1,11 +1,22 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { GameShell } from '../../components/GameShell'
+import { GameModeSelect } from '../../components/GameModeSelect'
+import { VsSequencer } from '../../components/VsSequencer'
 import { LocalLeaderboard } from '../../components/LocalLeaderboard'
 import { addRun, getRuns } from '../../lib/leaderboard'
+import {
+  createRunConfig,
+  difficultyForRound,
+  ENDLESS_LIVES,
+  FIXED_ROUNDS,
+  isMiss,
+  markDailyPlayed,
+  rngFor,
+  type RunConfig,
+} from '../../lib/modes'
+import type { Rng } from '../../lib/rng'
 
 const GAME_ID = 'guess-distance'
-const ROUNDS = 5
-const FLASH_MS = 1500
 
 // Points live in percentage-space (0-100), same trick as CenterGame: nothing
 // that needs the board's real pixel size exists on the intro screen, so we
@@ -20,30 +31,47 @@ type Round = {
   actualDistance: number
   guessedDistance: number
   score: number
+  flashMs: number
 }
 
-function randomPoint(): Point {
-  return { x: 8 + Math.random() * 84, y: 8 + Math.random() * 84 }
+function randomPoint(rng: Rng): Point {
+  return { x: 8 + rng() * 84, y: 8 + rng() * 84 }
 }
 
 function pctDist(a: Point, b: Point) {
   return Math.hypot(a.x - b.x, a.y - b.y)
 }
 
-function randomPair(): [Point, Point] {
-  const a = randomPoint()
-  let b = randomPoint()
+// t: 0 (easiest) -> 1 (hardest). Harder rounds force the two dots further
+// apart, which makes the gap harder to judge precisely.
+function randomPair(rng: Rng, t: number): [Point, Point] {
+  const minSep = 20 + 35 * t // 20 -> 55
+  const a = randomPoint(rng)
+  let b = randomPoint(rng)
   let attempts = 0
-  while (pctDist(a, b) < 30 && attempts < 20) {
-    b = randomPoint()
+  while (pctDist(a, b) < minSep && attempts < 20) {
+    b = randomPoint(rng)
     attempts++
   }
   return [a, b]
 }
 
-function emptyRound(): Round {
-  const [anchor, target] = randomPair()
-  return { anchor, target, guess: null, actualDistance: 0, guessedDistance: 0, score: 0 }
+// t: 0 (easiest) -> 1 (hardest). Harder rounds flash the dots for less time.
+function flashMsFor(t: number): number {
+  return 1500 - 900 * t
+}
+
+function emptyRound(rng: Rng, t: number): Round {
+  const [anchor, target] = randomPair(rng, t)
+  return {
+    anchor,
+    target,
+    guess: null,
+    actualDistance: 0,
+    guessedDistance: 0,
+    score: 0,
+    flashMs: flashMsFor(t),
+  }
 }
 
 function toPx(p: Point, rectW: number, rectH: number) {
@@ -62,24 +90,88 @@ function scoreFor(round: Round, guess: Point, rectW: number, rectH: number) {
   return { actualDistance, guessedDistance, score }
 }
 
+export function GuessDistanceGame() {
+  const [config, setConfig] = useState<RunConfig | null>(null)
+
+  return (
+    <GameShell eyebrow="Memory" title="Guess Distance">
+      {!config ? (
+        <GameModeSelect gameId={GAME_ID} onStart={setConfig} />
+      ) : config.mode === 'vs' && config.vs ? (
+        <VsSequencer
+          playerCount={config.vs.playerCount}
+          seed={config.seed}
+          onExit={() => setConfig(null)}
+          renderRun={(runConfig, onFinish) => (
+            <GuessDistanceRun
+              key={`${runConfig.seed}-${runConfig.vs?.playerIndex ?? 0}`}
+              config={runConfig}
+              onFinish={onFinish}
+              onChangeMode={() => setConfig(null)}
+            />
+          )}
+        />
+      ) : (
+        <GuessDistanceRun
+          key={config.seed}
+          config={config}
+          onChangeMode={() => setConfig(null)}
+          onPlayAgain={
+            config.mode === 'daily'
+              ? undefined
+              : () => setConfig(createRunConfig(config.mode, GAME_ID))
+          }
+        />
+      )}
+    </GameShell>
+  )
+}
+
+function modeLabel(config: RunConfig): string {
+  if (config.vs) return `Player ${config.vs.playerIndex + 1} of ${config.vs.playerCount}`
+  if (config.mode === 'daily') return 'Daily challenge'
+  if (config.mode === 'endless') return 'Endless'
+  return 'Practice'
+}
+
 type Phase = 'intro' | 'showing' | 'guessing' | 'roundResult' | 'done'
 
-export function GuessDistanceGame() {
+function GuessDistanceRun({
+  config,
+  onFinish,
+  onChangeMode,
+  onPlayAgain,
+}: {
+  config: RunConfig
+  onFinish?: (score: number) => void
+  onChangeMode: () => void
+  onPlayAgain?: () => void
+}) {
+  const rng = useMemo(() => rngFor(config), [config])
+  const isEndless = config.mode === 'endless'
+
   const [phase, setPhase] = useState<Phase>('intro')
   const [rounds, setRounds] = useState<Round[]>([])
-  const [runs, setRuns] = useState(() => getRuns(GAME_ID, 'daily'))
+  const [lives, setLives] = useState(ENDLESS_LIVES)
+  const [runs, setRuns] = useState(() => getRuns(GAME_ID, config.mode))
 
   const currentIndex = rounds.length - 1
   const current = rounds[currentIndex]
 
   useEffect(() => {
-    if (phase !== 'showing') return
-    const timer = setTimeout(() => setPhase('guessing'), FLASH_MS)
+    if (phase !== 'showing' || !current) return
+    const timer = setTimeout(() => setPhase('guessing'), current.flashMs)
     return () => clearTimeout(timer)
-  }, [phase, currentIndex])
+  }, [phase, currentIndex, current])
+
+  function makeRound(roundNum: number): Round {
+    const t = difficultyForRound(roundNum, config.mode)
+    return emptyRound(rng, t)
+  }
 
   function startGame() {
-    setRounds([emptyRound()])
+    setRounds([makeRound(1)])
+    setLives(ENDLESS_LIVES)
     setPhase('showing')
   }
 
@@ -101,34 +193,61 @@ export function GuessDistanceGame() {
         i === currentIndex ? { ...r, guess, actualDistance, guessedDistance, score } : r,
       ),
     )
+    if (isEndless && isMiss(score)) setLives((l) => l - 1)
     setPhase('roundResult')
   }
 
-  function nextRound() {
-    if (rounds.length >= ROUNDS) {
-      const total = rounds.reduce((sum, r) => sum + r.score, 0) / rounds.length
-      const updated = addRun(GAME_ID, 'daily', total)
-      setRuns(updated)
-      setPhase('done')
+  function finish(finalScore: number) {
+    if (onFinish) {
+      onFinish(finalScore)
       return
     }
-    setRounds((rs) => [...rs, emptyRound()])
+    if (config.mode === 'daily') markDailyPlayed(GAME_ID, finalScore)
+    if (config.mode !== 'practice') setRuns(addRun(GAME_ID, config.mode, finalScore))
+    setPhase('done')
+  }
+
+  function nextRound() {
+    if (isEndless) {
+      if (lives <= 0) {
+        finish(rounds.length)
+        return
+      }
+      setRounds((rs) => [...rs, makeRound(rs.length + 1)])
+      setPhase('showing')
+      return
+    }
+    if (rounds.length >= FIXED_ROUNDS) {
+      finish(rounds.reduce((s, r) => s + r.score, 0) / rounds.length)
+      return
+    }
+    setRounds((rs) => [...rs, makeRound(rs.length + 1)])
     setPhase('showing')
   }
 
-  function playAgain() {
-    setRounds([])
-    setPhase('intro')
-  }
+  const isRunOver = isEndless ? lives <= 0 : rounds.length >= FIXED_ROUNDS
 
   return (
-    <GameShell eyebrow="Memory" title="Guess Distance">
+    <div>
       {phase === 'intro' && (
         <div style={{ textAlign: 'center' }}>
+          <div
+            style={{
+              fontSize: 13,
+              fontWeight: 600,
+              color: 'var(--text-faint)',
+              textTransform: 'uppercase',
+              marginBottom: 8,
+            }}
+          >
+            {modeLabel(config)}
+          </div>
           <p style={{ color: 'var(--text-dim)', maxWidth: 440, margin: '0 auto 28px' }}>
             Two dots flash briefly. One reappears as an anchor — click where
-            the other one was, relative to it. {ROUNDS} rounds, scored by how
-            close your guessed distance is to the real one.
+            the other one was, relative to it.{' '}
+            {isEndless
+              ? `${ENDLESS_LIVES} lives — it gets harder the longer you survive.`
+              : `${FIXED_ROUNDS} rounds, scored by how close your guessed distance is to the real one.`}
           </p>
           <PlayButton onClick={startGame} label="Start" />
         </div>
@@ -137,7 +256,11 @@ export function GuessDistanceGame() {
       {(phase === 'showing' || phase === 'guessing' || phase === 'roundResult') &&
         current && (
           <div>
-            <RoundProgress index={currentIndex} total={ROUNDS} />
+            {isEndless ? (
+              <EndlessHud round={rounds.length} lives={lives} />
+            ) : (
+              <RoundProgress index={currentIndex} total={FIXED_ROUNDS} />
+            )}
             <p
               style={{
                 textAlign: 'center',
@@ -239,7 +362,7 @@ export function GuessDistanceGame() {
                 </div>
                 <PlayButton
                   onClick={nextRound}
-                  label={rounds.length >= ROUNDS ? 'See results' : 'Next round'}
+                  label={isRunOver ? 'See results' : 'Next round'}
                 />
               </div>
             )}
@@ -248,46 +371,59 @@ export function GuessDistanceGame() {
 
       {phase === 'done' && (
         <div>
-          <div
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 8,
-              marginBottom: 20,
-            }}
-          >
-            {rounds.map((r, i) => (
-              <div
-                key={i}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  fontSize: 14,
-                  color: 'var(--text-dim)',
-                }}
-              >
-                <span>Round {i + 1}</span>
-                <span>{Math.abs(r.guessedDistance - r.actualDistance).toFixed(0)}px off</span>
-                <span style={{ fontWeight: 600, color: 'var(--text)' }}>
-                  {r.score.toFixed(1)}
-                </span>
-              </div>
-            ))}
-          </div>
+          {!isEndless && (
+            <div
+              style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 20 }}
+            >
+              {rounds.map((r, i) => (
+                <div
+                  key={i}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    fontSize: 14,
+                    color: 'var(--text-dim)',
+                  }}
+                >
+                  <span>Round {i + 1}</span>
+                  <span>{Math.abs(r.guessedDistance - r.actualDistance).toFixed(0)}px off</span>
+                  <span style={{ fontWeight: 600, color: 'var(--text)' }}>
+                    {r.score.toFixed(1)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
           <div style={{ textAlign: 'center' }}>
             <div style={{ fontSize: 13, color: 'var(--text-faint)' }}>
-              AVERAGE SCORE
+              {isEndless ? 'ROUNDS SURVIVED' : 'AVERAGE SCORE'}
             </div>
             <div style={{ fontSize: 44, fontWeight: 700, margin: '4px 0 24px' }}>
-              {(rounds.reduce((s, r) => s + r.score, 0) / rounds.length).toFixed(1)}
+              {isEndless
+                ? rounds.length
+                : (rounds.reduce((s, r) => s + r.score, 0) / rounds.length).toFixed(1)}
             </div>
-            <PlayButton onClick={playAgain} label="Play again" />
+            {onPlayAgain ? (
+              <PlayButton onClick={onPlayAgain} label="Play again" />
+            ) : (
+              <div style={{ color: 'var(--text-dim)', fontSize: 14 }}>
+                Come back tomorrow for a new Daily.
+              </div>
+            )}
           </div>
-          <LocalLeaderboard runs={runs} />
+          <div style={{ textAlign: 'center', marginTop: 16 }}>
+            <LinkButton onClick={onChangeMode} label="Change mode" />
+          </div>
+          {config.mode !== 'practice' && (
+            <LocalLeaderboard
+              runs={runs}
+              formatScore={isEndless ? (s) => `${s.toFixed(0)} rounds` : undefined}
+            />
+          )}
         </div>
       )}
-    </GameShell>
+    </div>
   )
 }
 
@@ -312,6 +448,37 @@ function RoundProgress({ index, total }: { index: number; total: number }) {
           }}
         />
       ))}
+    </div>
+  )
+}
+
+function EndlessHud({ round, lives }: { round: number; lives: number }) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 16,
+        marginBottom: 16,
+        fontSize: 13,
+        color: 'var(--text-dim)',
+      }}
+    >
+      <span>Round {round}</span>
+      <span style={{ display: 'flex', gap: 4 }}>
+        {Array.from({ length: ENDLESS_LIVES }).map((_, i) => (
+          <span
+            key={i}
+            style={{
+              width: 8,
+              height: 8,
+              borderRadius: '50%',
+              background: i < lives ? 'var(--danger)' : 'var(--border)',
+            }}
+          />
+        ))}
+      </span>
     </div>
   )
 }
@@ -356,6 +523,24 @@ function PlayButton({ onClick, label }: { onClick: () => void; label: string }) 
         fontSize: 16,
         fontWeight: 600,
         cursor: 'pointer',
+      }}
+    >
+      {label}
+    </button>
+  )
+}
+
+function LinkButton({ onClick, label }: { onClick: () => void; label: string }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        background: 'none',
+        border: 'none',
+        color: 'var(--text-faint)',
+        fontSize: 13,
+        cursor: 'pointer',
+        textDecoration: 'underline',
       }}
     >
       {label}
