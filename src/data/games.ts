@@ -58,7 +58,7 @@ export const games: GameMeta[] = [
     name: 'Predict',
     tagline: 'Watch it move, then call where it stops.',
     category: 'Timing',
-    status: 'soon',
+    status: 'live',
   },
   {
     id: 'crowd',
