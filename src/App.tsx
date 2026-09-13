@@ -8,6 +8,7 @@ import { BlinkGame } from './pages/games/BlinkGame'
 import { CountGame } from './pages/games/CountGame'
 import { PredictGame } from './pages/games/PredictGame'
 import { SwapGame } from './pages/games/SwapGame'
+import { CrowdGame } from './pages/games/CrowdGame'
 import { NotFound } from './pages/NotFound'
 
 export function App() {
@@ -23,6 +24,7 @@ export function App() {
           <Route path="/count" element={<CountGame />} />
           <Route path="/predict" element={<PredictGame />} />
           <Route path="/swap" element={<SwapGame />} />
+          <Route path="/crowd" element={<CrowdGame />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </HashRouter>
