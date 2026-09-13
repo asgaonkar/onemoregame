@@ -1,6 +1,12 @@
 import type { RunRecord } from '../lib/leaderboard'
 
-export function LocalLeaderboard({ runs }: { runs: RunRecord[] }) {
+export function LocalLeaderboard({
+  runs,
+  formatScore = (score) => score.toFixed(1),
+}: {
+  runs: RunRecord[]
+  formatScore?: (score: number) => string
+}) {
   if (runs.length === 0) return null
 
   return (
@@ -43,7 +49,7 @@ export function LocalLeaderboard({ runs }: { runs: RunRecord[] }) {
                 day: 'numeric',
               })}
             </span>
-            <span style={{ fontWeight: 600 }}>{run.score.toFixed(1)}</span>
+            <span style={{ fontWeight: 600 }}>{formatScore(run.score)}</span>
           </div>
         ))}
       </div>

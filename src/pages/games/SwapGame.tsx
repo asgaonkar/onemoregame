@@ -90,7 +90,7 @@ export function SwapGame() {
   const [rounds, setRounds] = useState<Round[]>([])
   const [liveTokenSlot, setLiveTokenSlot] = useState<number[]>([0, 1, 2, 3, 4])
   const [highlightOn, setHighlightOn] = useState(false)
-  const [runs, setRuns] = useState(() => getRuns(GAME_ID))
+  const [runs, setRuns] = useState(() => getRuns(GAME_ID, 'daily'))
 
   const currentIndex = rounds.length - 1
   const current = rounds[currentIndex]
@@ -156,7 +156,7 @@ export function SwapGame() {
   function nextRound() {
     if (rounds.length >= ROUNDS) {
       const total = rounds.reduce((sum, r) => sum + r.score, 0) / rounds.length
-      const updated = addRun(GAME_ID, total)
+      const updated = addRun(GAME_ID, 'daily', total)
       setRuns(updated)
       setPhase('done')
       return

@@ -84,7 +84,7 @@ export function PredictGame() {
     'intro',
   )
   const [rounds, setRounds] = useState<Round[]>([])
-  const [runs, setRuns] = useState(() => getRuns(GAME_ID))
+  const [runs, setRuns] = useState(() => getRuns(GAME_ID, 'daily'))
   const [pos, setPos] = useState<Point>({ x: 50, y: 50 })
   const [dotVisible, setDotVisible] = useState(false)
   const [canGuess, setCanGuess] = useState(false)
@@ -161,7 +161,7 @@ export function PredictGame() {
   function nextRound() {
     if (rounds.length >= ROUNDS) {
       const total = rounds.reduce((sum, r) => sum + r.score, 0) / rounds.length
-      const updated = addRun(GAME_ID, total)
+      const updated = addRun(GAME_ID, 'daily', total)
       setRuns(updated)
       setPhase('done')
       return

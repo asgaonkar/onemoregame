@@ -1,10 +1,22 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { GameShell } from '../../components/GameShell'
+import { GameModeSelect } from '../../components/GameModeSelect'
+import { VsSequencer } from '../../components/VsSequencer'
 import { LocalLeaderboard } from '../../components/LocalLeaderboard'
 import { addRun, getRuns } from '../../lib/leaderboard'
+import {
+  createRunConfig,
+  difficultyForRound,
+  ENDLESS_LIVES,
+  FIXED_ROUNDS,
+  isMiss,
+  markDailyPlayed,
+  rngFor,
+  type RunConfig,
+} from '../../lib/modes'
+import type { Rng } from '../../lib/rng'
 
 const GAME_ID = 'center'
-const ROUNDS = 5
 
 // Box position/size are percentages of the stage (0-100), so no DOM
 // measurement is needed to generate a round — only the click handler
@@ -18,16 +30,14 @@ type Round = {
   score: number
 }
 
-function randomBox(): Box {
-  const w = 35 + Math.random() * 30
-  const h = 30 + Math.random() * 30
-  const x = (100 - w) * (0.1 + Math.random() * 0.8)
-  const y = (100 - h) * (0.1 + Math.random() * 0.8)
+// t: 0 (easiest) -> 1 (hardest). Harder rounds get a smaller box.
+function randomBox(rng: Rng, t: number): Box {
+  const sizeFactor = 1 - 0.45 * t
+  const w = (35 + rng() * 30) * sizeFactor
+  const h = (30 + rng() * 30) * sizeFactor
+  const x = (100 - w) * (0.1 + rng() * 0.8)
+  const y = (100 - h) * (0.1 + rng() * 0.8)
   return { x, y, w, h }
-}
-
-function emptyRound(): Round {
-  return { box: randomBox(), guess: null, distance: 0, score: 0 }
 }
 
 function scoreFor(
@@ -47,17 +57,81 @@ function scoreFor(
 }
 
 export function CenterGame() {
+  const [config, setConfig] = useState<RunConfig | null>(null)
+
+  return (
+    <GameShell eyebrow="Precision" title="Center">
+      {!config ? (
+        <GameModeSelect gameId={GAME_ID} onStart={setConfig} />
+      ) : config.mode === 'vs' && config.vs ? (
+        <VsSequencer
+          playerCount={config.vs.playerCount}
+          seed={config.seed}
+          onExit={() => setConfig(null)}
+          renderRun={(runConfig, onFinish) => (
+            <CenterRun
+              key={`${runConfig.seed}-${runConfig.vs?.playerIndex ?? 0}`}
+              config={runConfig}
+              onFinish={onFinish}
+              onChangeMode={() => setConfig(null)}
+            />
+          )}
+        />
+      ) : (
+        <CenterRun
+          key={config.seed}
+          config={config}
+          onChangeMode={() => setConfig(null)}
+          onPlayAgain={
+            config.mode === 'daily'
+              ? undefined
+              : () => setConfig(createRunConfig(config.mode, GAME_ID))
+          }
+        />
+      )}
+    </GameShell>
+  )
+}
+
+function modeLabel(config: RunConfig): string {
+  if (config.vs) return `Player ${config.vs.playerIndex + 1} of ${config.vs.playerCount}`
+  if (config.mode === 'daily') return 'Daily challenge'
+  if (config.mode === 'endless') return 'Endless'
+  return 'Practice'
+}
+
+function CenterRun({
+  config,
+  onFinish,
+  onChangeMode,
+  onPlayAgain,
+}: {
+  config: RunConfig
+  onFinish?: (score: number) => void
+  onChangeMode: () => void
+  onPlayAgain?: () => void
+}) {
+  const rng = useMemo(() => rngFor(config), [config])
+  const isEndless = config.mode === 'endless'
+
   const [phase, setPhase] = useState<'intro' | 'playing' | 'roundResult' | 'done'>(
     'intro',
   )
   const [rounds, setRounds] = useState<Round[]>([])
-  const [runs, setRuns] = useState(() => getRuns(GAME_ID))
+  const [lives, setLives] = useState(ENDLESS_LIVES)
+  const [runs, setRuns] = useState(() => getRuns(GAME_ID, config.mode))
 
   const currentIndex = rounds.length - 1
   const current = rounds[currentIndex]
 
+  function makeRound(roundNum: number): Round {
+    const t = difficultyForRound(roundNum, config.mode)
+    return { box: randomBox(rng, t), guess: null, distance: 0, score: 0 }
+  }
+
   function startGame() {
-    setRounds([emptyRound()])
+    setRounds([makeRound(1)])
+    setLives(ENDLESS_LIVES)
     setPhase('playing')
   }
 
@@ -72,33 +146,60 @@ export function CenterGame() {
     setRounds((rs) =>
       rs.map((r, i) => (i === currentIndex ? { ...r, guess, distance, score } : r)),
     )
+    if (isEndless && isMiss(score)) setLives((l) => l - 1)
     setPhase('roundResult')
   }
 
-  function nextRound() {
-    if (rounds.length >= ROUNDS) {
-      const total = rounds.reduce((sum, r) => sum + r.score, 0) / rounds.length
-      const updated = addRun(GAME_ID, total)
-      setRuns(updated)
-      setPhase('done')
+  function finish(finalScore: number) {
+    if (onFinish) {
+      onFinish(finalScore)
       return
     }
-    setRounds((rs) => [...rs, emptyRound()])
+    if (config.mode === 'daily') markDailyPlayed(GAME_ID, finalScore)
+    if (config.mode !== 'practice') setRuns(addRun(GAME_ID, config.mode, finalScore))
+    setPhase('done')
+  }
+
+  function nextRound() {
+    if (isEndless) {
+      if (lives <= 0) {
+        finish(rounds.length)
+        return
+      }
+      setRounds((rs) => [...rs, makeRound(rs.length + 1)])
+      setPhase('playing')
+      return
+    }
+    if (rounds.length >= FIXED_ROUNDS) {
+      finish(rounds.reduce((s, r) => s + r.score, 0) / rounds.length)
+      return
+    }
+    setRounds((rs) => [...rs, makeRound(rs.length + 1)])
     setPhase('playing')
   }
 
-  function playAgain() {
-    setRounds([])
-    setPhase('intro')
-  }
+  const isRunOver = isEndless ? lives <= 0 : rounds.length >= FIXED_ROUNDS
 
   return (
-    <GameShell eyebrow="Precision" title="Center">
+    <div>
       {phase === 'intro' && (
         <div style={{ textAlign: 'center' }}>
+          <div
+            style={{
+              fontSize: 13,
+              fontWeight: 600,
+              color: 'var(--text-faint)',
+              textTransform: 'uppercase',
+              marginBottom: 8,
+            }}
+          >
+            {modeLabel(config)}
+          </div>
           <p style={{ color: 'var(--text-dim)', maxWidth: 420, margin: '0 auto 28px' }}>
-            A box appears. Click its exact center. {ROUNDS} rounds, scored by
-            how close you land.
+            A box appears. Click its exact center.{' '}
+            {isEndless
+              ? `${ENDLESS_LIVES} lives — it gets harder the longer you survive.`
+              : `${FIXED_ROUNDS} rounds, scored by how close you land.`}
           </p>
           <PlayButton onClick={startGame} label="Start" />
         </div>
@@ -106,7 +207,11 @@ export function CenterGame() {
 
       {(phase === 'playing' || phase === 'roundResult') && current && (
         <div>
-          <RoundProgress index={currentIndex} total={ROUNDS} />
+          {isEndless ? (
+            <EndlessHud round={rounds.length} lives={lives} />
+          ) : (
+            <RoundProgress index={currentIndex} total={FIXED_ROUNDS} />
+          )}
           <div
             onClick={handleStageClick}
             style={{
@@ -160,7 +265,7 @@ export function CenterGame() {
               </div>
               <PlayButton
                 onClick={nextRound}
-                label={rounds.length >= ROUNDS ? 'See results' : 'Next round'}
+                label={isRunOver ? 'See results' : 'Next round'}
               />
             </div>
           )}
@@ -169,59 +274,65 @@ export function CenterGame() {
 
       {phase === 'done' && (
         <div>
-          <div
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 8,
-              marginBottom: 20,
-            }}
-          >
-            {rounds.map((r, i) => (
-              <div
-                key={i}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  fontSize: 14,
-                  color: 'var(--text-dim)',
-                }}
-              >
-                <span>Round {i + 1}</span>
-                <span>{r.distance.toFixed(0)}px off</span>
-                <span style={{ fontWeight: 600, color: 'var(--text)' }}>
-                  {r.score.toFixed(1)}
-                </span>
-              </div>
-            ))}
-          </div>
+          {!isEndless && (
+            <div
+              style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 20 }}
+            >
+              {rounds.map((r, i) => (
+                <div
+                  key={i}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    fontSize: 14,
+                    color: 'var(--text-dim)',
+                  }}
+                >
+                  <span>Round {i + 1}</span>
+                  <span>{r.distance.toFixed(0)}px off</span>
+                  <span style={{ fontWeight: 600, color: 'var(--text)' }}>
+                    {r.score.toFixed(1)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
           <div style={{ textAlign: 'center' }}>
             <div style={{ fontSize: 13, color: 'var(--text-faint)' }}>
-              AVERAGE SCORE
+              {isEndless ? 'ROUNDS SURVIVED' : 'AVERAGE SCORE'}
             </div>
             <div style={{ fontSize: 44, fontWeight: 700, margin: '4px 0 24px' }}>
-              {(rounds.reduce((s, r) => s + r.score, 0) / rounds.length).toFixed(1)}
+              {isEndless
+                ? rounds.length
+                : (rounds.reduce((s, r) => s + r.score, 0) / rounds.length).toFixed(1)}
             </div>
-            <PlayButton onClick={playAgain} label="Play again" />
+            {onPlayAgain ? (
+              <PlayButton onClick={onPlayAgain} label="Play again" />
+            ) : (
+              <div style={{ color: 'var(--text-dim)', fontSize: 14 }}>
+                Come back tomorrow for a new Daily.
+              </div>
+            )}
           </div>
-          <LocalLeaderboard runs={runs} />
+          <div style={{ textAlign: 'center', marginTop: 16 }}>
+            <LinkButton onClick={onChangeMode} label="Change mode" />
+          </div>
+          {config.mode !== 'practice' && (
+            <LocalLeaderboard
+              runs={runs}
+              formatScore={isEndless ? (s) => `${s.toFixed(0)} rounds` : undefined}
+            />
+          )}
         </div>
       )}
-    </GameShell>
+    </div>
   )
 }
 
 function RoundProgress({ index, total }: { index: number; total: number }) {
   return (
-    <div
-      style={{
-        display: 'flex',
-        gap: 6,
-        justifyContent: 'center',
-        marginBottom: 16,
-      }}
-    >
+    <div style={{ display: 'flex', gap: 6, justifyContent: 'center', marginBottom: 16 }}>
       {Array.from({ length: total }).map((_, i) => (
         <div
           key={i}
@@ -237,15 +348,38 @@ function RoundProgress({ index, total }: { index: number; total: number }) {
   )
 }
 
-function Dot({
-  xPct,
-  yPct,
-  color,
-}: {
-  xPct: number
-  yPct: number
-  color: string
-}) {
+function EndlessHud({ round, lives }: { round: number; lives: number }) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 16,
+        marginBottom: 16,
+        fontSize: 13,
+        color: 'var(--text-dim)',
+      }}
+    >
+      <span>Round {round}</span>
+      <span style={{ display: 'flex', gap: 4 }}>
+        {Array.from({ length: ENDLESS_LIVES }).map((_, i) => (
+          <span
+            key={i}
+            style={{
+              width: 8,
+              height: 8,
+              borderRadius: '50%',
+              background: i < lives ? 'var(--danger)' : 'var(--border)',
+            }}
+          />
+        ))}
+      </span>
+    </div>
+  )
+}
+
+function Dot({ xPct, yPct, color }: { xPct: number; yPct: number; color: string }) {
   return (
     <div
       style={{
@@ -277,6 +411,24 @@ function PlayButton({ onClick, label }: { onClick: () => void; label: string }) 
         fontSize: 16,
         fontWeight: 600,
         cursor: 'pointer',
+      }}
+    >
+      {label}
+    </button>
+  )
+}
+
+function LinkButton({ onClick, label }: { onClick: () => void; label: string }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        background: 'none',
+        border: 'none',
+        color: 'var(--text-faint)',
+        fontSize: 13,
+        cursor: 'pointer',
+        textDecoration: 'underline',
       }}
     >
       {label}

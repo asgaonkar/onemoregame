@@ -93,7 +93,7 @@ export function CrowdGame() {
   const [stage, setStage] = useState<Stage>('highlight')
   const [rounds, setRounds] = useState<Round[]>([])
   const [dots, setDots] = useState<DotState[]>([])
-  const [runs, setRuns] = useState(() => getRuns(GAME_ID))
+  const [runs, setRuns] = useState(() => getRuns(GAME_ID, 'daily'))
 
   const dotsRef = useRef<DotState[]>([])
   const rafRef = useRef<number | null>(null)
@@ -191,7 +191,7 @@ export function CrowdGame() {
   function nextRound() {
     if (rounds.length >= ROUNDS) {
       const total = rounds.reduce((sum, r) => sum + r.score, 0) / rounds.length
-      const updated = addRun(GAME_ID, total)
+      const updated = addRun(GAME_ID, 'daily', total)
       setRuns(updated)
       setPhase('done')
       return

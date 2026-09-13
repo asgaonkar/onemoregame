@@ -34,7 +34,7 @@ export function WaitGame() {
     'intro' | 'ready' | 'running' | 'roundResult' | 'done'
   >('intro')
   const [rounds, setRounds] = useState<Round[]>([])
-  const [runs, setRuns] = useState(() => getRuns(GAME_ID))
+  const [runs, setRuns] = useState(() => getRuns(GAME_ID, 'daily'))
   const startRef = useRef<number>(0)
 
   const currentIndex = rounds.length - 1
@@ -64,7 +64,7 @@ export function WaitGame() {
   function nextRound() {
     if (rounds.length >= ROUNDS) {
       const total = rounds.reduce((sum, r) => sum + r.score, 0) / rounds.length
-      const updated = addRun(GAME_ID, total)
+      const updated = addRun(GAME_ID, 'daily', total)
       setRuns(updated)
       setPhase('done')
       return
