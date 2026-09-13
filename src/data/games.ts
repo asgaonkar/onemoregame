@@ -23,7 +23,7 @@ export const games: GameMeta[] = [
     name: 'Swap',
     tagline: 'Objects swap places fast. Find where one ended up.',
     category: 'Memory',
-    status: 'soon',
+    status: 'live',
   },
   {
     id: 'guess-distance',
