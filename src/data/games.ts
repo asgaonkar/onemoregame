@@ -30,7 +30,7 @@ export const games: GameMeta[] = [
     name: 'Guess Distance',
     tagline: 'Two points flash briefly. Recall the gap between them.',
     category: 'Memory',
-    status: 'soon',
+    status: 'live',
   },
   {
     id: 'perfect-circle',

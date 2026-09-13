@@ -3,6 +3,7 @@ import { ThemeProvider } from './lib/theme'
 import { Home } from './pages/Home'
 import { CenterGame } from './pages/games/CenterGame'
 import { WaitGame } from './pages/games/WaitGame'
+import { GuessDistanceGame } from './pages/games/GuessDistanceGame'
 import { NotFound } from './pages/NotFound'
 
 export function App() {
@@ -13,6 +14,7 @@ export function App() {
           <Route path="/" element={<Home />} />
           <Route path="/center" element={<CenterGame />} />
           <Route path="/wait" element={<WaitGame />} />
+          <Route path="/guess-distance" element={<GuessDistanceGame />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </HashRouter>
