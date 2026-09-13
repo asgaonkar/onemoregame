@@ -1,11 +1,23 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { GameShell } from '../../components/GameShell'
+import { GameModeSelect } from '../../components/GameModeSelect'
+import { VsSequencer } from '../../components/VsSequencer'
 import { LocalLeaderboard } from '../../components/LocalLeaderboard'
 import { addRun, getRuns } from '../../lib/leaderboard'
+import {
+  createRunConfig,
+  difficultyForRound,
+  ENDLESS_LIVES,
+  FIXED_ROUNDS,
+  isMiss,
+  markDailyPlayed,
+  rngFor,
+  type GameMode,
+  type RunConfig,
+} from '../../lib/modes'
+import type { Rng } from '../../lib/rng'
 
 const GAME_ID = 'blink'
-const ROUNDS = 5
-const PREVIEW_MS = 1700
 
 // Shapes live in percentage-space (0-100) so nothing needs the board's real
 // pixel size until a click actually happens — the board is a square
@@ -26,6 +38,7 @@ type Round = {
   modifiedShapes: Shape[]
   changedIndex: number
   modType: ModType
+  previewMs: number
   guess: { xPct: number; yPct: number } | null
   distance: number
   hit: boolean
@@ -47,20 +60,60 @@ function clamp(v: number, min: number, max: number) {
   return Math.max(min, Math.min(max, v))
 }
 
-function pickColor(exclude?: string): string {
-  const options = exclude ? COLORS.filter((c) => c !== exclude) : COLORS
-  return options[Math.floor(Math.random() * options.length)]
+function lerp(a: number, b: number, t: number) {
+  return a + (b - a) * t
 }
 
-function randomShapes(count: number): Shape[] {
+function pickColor(rng: Rng, exclude?: string): string {
+  const options = exclude ? COLORS.filter((c) => c !== exclude) : COLORS
+  return options[Math.floor(rng() * options.length)]
+}
+
+// Hue (0-360) of a hex color, used only to measure how visually close two
+// palette colors are to each other — the palette itself stays fixed.
+function hexToHue(hex: string): number {
+  const r = parseInt(hex.slice(1, 3), 16) / 255
+  const g = parseInt(hex.slice(3, 5), 16) / 255
+  const b = parseInt(hex.slice(5, 7), 16) / 255
+  const max = Math.max(r, g, b)
+  const min = Math.min(r, g, b)
+  const d = max - min
+  if (d === 0) return 0
+  let h: number
+  if (max === r) h = ((g - b) / d) % 6
+  else if (max === g) h = (b - r) / d + 2
+  else h = (r - g) / d + 4
+  h *= 60
+  if (h < 0) h += 360
+  return h
+}
+
+function hueDiff(a: number, b: number): number {
+  const diff = Math.abs(a - b) % 360
+  return diff > 180 ? 360 - diff : diff
+}
+
+// t: 0 (easiest) -> 1 (hardest). At t=0 the replacement color is picked from
+// the whole palette (often very different); at t=1 it's restricted to the
+// hue-closest color(s), making the swap much subtler to spot.
+function pickCloseColor(rng: Rng, current: string, t: number): string {
+  const candidates = COLORS.filter((c) => c !== current)
+    .map((c) => ({ c, diff: hueDiff(hexToHue(c), hexToHue(current)) }))
+    .sort((a, b) => a.diff - b.diff)
+  const poolSize = Math.max(1, Math.round(candidates.length * (1 - 0.8 * t)))
+  const pool = candidates.slice(0, poolSize)
+  return pool[Math.floor(rng() * pool.length)].c
+}
+
+function randomShapes(rng: Rng, count: number): Shape[] {
   const shapes: Shape[] = []
   let attempts = 0
   while (shapes.length < count && attempts < count * 60) {
     attempts++
-    const size = 10 + Math.random() * 8
+    const size = 10 + rng() * 8
     const margin = size / 2 + 4
-    const x = margin + Math.random() * (100 - 2 * margin)
-    const y = margin + Math.random() * (100 - 2 * margin)
+    const x = margin + rng() * (100 - 2 * margin)
+    const y = margin + rng() * (100 - 2 * margin)
     const overlaps = shapes.some(
       (s) => Math.hypot(x - s.x, y - s.y) < (size + s.size) / 2 + 3,
     )
@@ -70,22 +123,26 @@ function randomShapes(count: number): Shape[] {
       x,
       y,
       size,
-      color: pickColor(),
-      kind: Math.random() < 0.5 ? 'circle' : 'square',
+      color: pickColor(rng),
+      kind: rng() < 0.5 ? 'circle' : 'square',
     })
   }
   return shapes
 }
 
-function moveShape(shapes: Shape[], idx: number): Shape[] {
+// t: 0 (easiest) -> 1 (hardest). Harder rounds move the shape a shorter
+// distance, making the change subtler to spot.
+function moveShape(rng: Rng, shapes: Shape[], idx: number, t: number): Shape[] {
   const modified = shapes.map((s) => ({ ...s }))
   const target = modified[idx]
   const margin = target.size / 2 + 4
+  const distMin = lerp(15, 8, t)
+  const distMax = lerp(35, 14, t)
   let attempts = 0
   while (attempts < 60) {
     attempts++
-    const angle = Math.random() * Math.PI * 2
-    const dist = 15 + Math.random() * 20
+    const angle = rng() * Math.PI * 2
+    const dist = distMin + rng() * (distMax - distMin)
     const nx = clamp(target.x + Math.cos(angle) * dist, margin, 100 - margin)
     const ny = clamp(target.y + Math.sin(angle) * dist, margin, 100 - margin)
     const overlaps = modified.some(
@@ -99,45 +156,52 @@ function moveShape(shapes: Shape[], idx: number): Shape[] {
     }
   }
   // Fallback: place it wherever fits, overlap constraint relaxed.
-  target.x = clamp(target.x + 20, margin, 100 - margin)
-  target.y = clamp(target.y + 20, margin, 100 - margin)
+  target.x = clamp(target.x + distMin, margin, 100 - margin)
+  target.y = clamp(target.y + distMin, margin, 100 - margin)
   return modified
 }
 
-function resizeShape(shapes: Shape[], idx: number): Shape[] {
+// t: 0 (easiest) -> 1 (hardest). Harder rounds change the size by a smaller
+// factor, making the change subtler to spot.
+function resizeShape(rng: Rng, shapes: Shape[], idx: number, t: number): Shape[] {
   const modified = shapes.map((s) => ({ ...s }))
   const target = modified[idx]
-  const grow = target.size < 16 || Math.random() < 0.5
-  target.size = clamp(grow ? target.size * 1.8 : target.size * 0.5, 6, 26)
+  const growFactor = lerp(1.8, 1.15, t)
+  const shrinkFactor = lerp(0.5, 0.85, t)
+  const grow = target.size < 16 || rng() < 0.5
+  target.size = clamp(grow ? target.size * growFactor : target.size * shrinkFactor, 6, 26)
   return modified
 }
 
-function recolorShape(shapes: Shape[], idx: number): Shape[] {
+function recolorShape(rng: Rng, shapes: Shape[], idx: number, t: number): Shape[] {
   const modified = shapes.map((s) => ({ ...s }))
   const target = modified[idx]
-  target.color = pickColor(target.color)
+  target.color = pickCloseColor(rng, target.color, t)
   return modified
 }
 
-function generateRound(): Round {
-  const count = 6 + Math.floor(Math.random() * 5) // 6-10
-  const shapes = randomShapes(count)
-  const changedIndex = Math.floor(Math.random() * shapes.length)
+function generateRound(rng: Rng, roundNum: number, mode: GameMode): Round {
+  const t = difficultyForRound(roundNum, mode)
+  const count = clamp(6 + Math.floor(rng() * 5) + Math.round(t * 3), 6, 13)
+  const shapes = randomShapes(rng, count)
+  const changedIndex = Math.floor(rng() * shapes.length)
   const modType: ModType = (['move', 'color', 'size'] as ModType[])[
-    Math.floor(Math.random() * 3)
+    Math.floor(rng() * 3)
   ]
   const modifiedShapes =
     modType === 'move'
-      ? moveShape(shapes, changedIndex)
+      ? moveShape(rng, shapes, changedIndex, t)
       : modType === 'color'
-        ? recolorShape(shapes, changedIndex)
-        : resizeShape(shapes, changedIndex)
+        ? recolorShape(rng, shapes, changedIndex, t)
+        : resizeShape(rng, shapes, changedIndex, t)
+  const previewMs = Math.round(lerp(1700, 800, t))
 
   return {
     shapes,
     modifiedShapes,
     changedIndex,
     modType,
+    previewMs,
     guess: null,
     distance: 0,
     hit: false,
@@ -152,23 +216,86 @@ const MOD_LABEL: Record<ModType, string> = {
 }
 
 export function BlinkGame() {
+  const [config, setConfig] = useState<RunConfig | null>(null)
+
+  return (
+    <GameShell eyebrow="Perception" title="Blink">
+      {!config ? (
+        <GameModeSelect gameId={GAME_ID} onStart={setConfig} />
+      ) : config.mode === 'vs' && config.vs ? (
+        <VsSequencer
+          playerCount={config.vs.playerCount}
+          seed={config.seed}
+          onExit={() => setConfig(null)}
+          renderRun={(runConfig, onFinish) => (
+            <BlinkRun
+              key={`${runConfig.seed}-${runConfig.vs?.playerIndex ?? 0}`}
+              config={runConfig}
+              onFinish={onFinish}
+              onChangeMode={() => setConfig(null)}
+            />
+          )}
+        />
+      ) : (
+        <BlinkRun
+          key={config.seed}
+          config={config}
+          onChangeMode={() => setConfig(null)}
+          onPlayAgain={
+            config.mode === 'daily'
+              ? undefined
+              : () => setConfig(createRunConfig(config.mode, GAME_ID))
+          }
+        />
+      )}
+    </GameShell>
+  )
+}
+
+function modeLabel(config: RunConfig): string {
+  if (config.vs) return `Player ${config.vs.playerIndex + 1} of ${config.vs.playerCount}`
+  if (config.mode === 'daily') return 'Daily challenge'
+  if (config.mode === 'endless') return 'Endless'
+  return 'Practice'
+}
+
+function BlinkRun({
+  config,
+  onFinish,
+  onChangeMode,
+  onPlayAgain,
+}: {
+  config: RunConfig
+  onFinish?: (score: number) => void
+  onChangeMode: () => void
+  onPlayAgain?: () => void
+}) {
+  const rng = useMemo(() => rngFor(config), [config])
+  const isEndless = config.mode === 'endless'
+
   const [phase, setPhase] = useState<
     'intro' | 'preview' | 'guessing' | 'roundResult' | 'done'
   >('intro')
   const [rounds, setRounds] = useState<Round[]>([])
-  const [runs, setRuns] = useState(() => getRuns(GAME_ID, 'daily'))
+  const [lives, setLives] = useState(ENDLESS_LIVES)
+  const [runs, setRuns] = useState(() => getRuns(GAME_ID, config.mode))
 
   const currentIndex = rounds.length - 1
   const current = rounds[currentIndex]
 
   useEffect(() => {
-    if (phase !== 'preview') return
-    const timer = setTimeout(() => setPhase('guessing'), PREVIEW_MS)
+    if (phase !== 'preview' || !current) return
+    const timer = setTimeout(() => setPhase('guessing'), current.previewMs)
     return () => clearTimeout(timer)
-  }, [phase, currentIndex])
+  }, [phase, currentIndex, current])
+
+  function makeRound(roundNum: number): Round {
+    return generateRound(rng, roundNum, config.mode)
+  }
 
   function startGame() {
-    setRounds([generateRound()])
+    setRounds([makeRound(1)])
+    setLives(ENDLESS_LIVES)
     setPhase('preview')
   }
 
@@ -186,38 +313,63 @@ export function BlinkGame() {
 
     setRounds((rs) =>
       rs.map((r, i) =>
-        i === currentIndex
-          ? { ...r, guess: { xPct, yPct }, distance, hit, score }
-          : r,
+        i === currentIndex ? { ...r, guess: { xPct, yPct }, distance, hit, score } : r,
       ),
     )
+    if (isEndless && isMiss(score)) setLives((l) => l - 1)
     setPhase('roundResult')
   }
 
-  function nextRound() {
-    if (rounds.length >= ROUNDS) {
-      const total = rounds.reduce((sum, r) => sum + r.score, 0) / rounds.length
-      const updated = addRun(GAME_ID, 'daily', total)
-      setRuns(updated)
-      setPhase('done')
+  function finish(finalScore: number) {
+    if (onFinish) {
+      onFinish(finalScore)
       return
     }
-    setRounds((rs) => [...rs, generateRound()])
+    if (config.mode === 'daily') markDailyPlayed(GAME_ID, finalScore)
+    if (config.mode !== 'practice') setRuns(addRun(GAME_ID, config.mode, finalScore))
+    setPhase('done')
+  }
+
+  function nextRound() {
+    if (isEndless) {
+      if (lives <= 0) {
+        finish(rounds.length)
+        return
+      }
+      setRounds((rs) => [...rs, makeRound(rs.length + 1)])
+      setPhase('preview')
+      return
+    }
+    if (rounds.length >= FIXED_ROUNDS) {
+      finish(rounds.reduce((s, r) => s + r.score, 0) / rounds.length)
+      return
+    }
+    setRounds((rs) => [...rs, makeRound(rs.length + 1)])
     setPhase('preview')
   }
 
-  function playAgain() {
-    setRounds([])
-    setPhase('intro')
-  }
+  const isRunOver = isEndless ? lives <= 0 : rounds.length >= FIXED_ROUNDS
 
   return (
-    <GameShell eyebrow="Perception" title="Blink">
+    <div>
       {phase === 'intro' && (
         <div style={{ textAlign: 'center' }}>
+          <div
+            style={{
+              fontSize: 13,
+              fontWeight: 600,
+              color: 'var(--text-faint)',
+              textTransform: 'uppercase',
+              marginBottom: 8,
+            }}
+          >
+            {modeLabel(config)}
+          </div>
           <p style={{ color: 'var(--text-dim)', maxWidth: 420, margin: '0 auto 28px' }}>
-            Study the shapes, then spot the one that changed. {ROUNDS} rounds,
-            100 points for a clean catch.
+            Study the shapes, then spot the one that changed.{' '}
+            {isEndless
+              ? `${ENDLESS_LIVES} lives — it gets harder the longer you survive.`
+              : `${FIXED_ROUNDS} rounds, 100 points for a clean catch.`}
           </p>
           <PlayButton onClick={startGame} label="Start" />
         </div>
@@ -226,7 +378,11 @@ export function BlinkGame() {
       {(phase === 'preview' || phase === 'guessing' || phase === 'roundResult') &&
         current && (
           <div>
-            <RoundProgress index={currentIndex} total={ROUNDS} />
+            {isEndless ? (
+              <EndlessHud round={rounds.length} lives={lives} />
+            ) : (
+              <RoundProgress index={currentIndex} total={FIXED_ROUNDS} />
+            )}
             <div
               style={{
                 textAlign: 'center',
@@ -293,7 +449,7 @@ export function BlinkGame() {
                 </div>
                 <PlayButton
                   onClick={nextRound}
-                  label={rounds.length >= ROUNDS ? 'See results' : 'Next round'}
+                  label={isRunOver ? 'See results' : 'Next round'}
                 />
               </div>
             )}
@@ -302,46 +458,59 @@ export function BlinkGame() {
 
       {phase === 'done' && (
         <div>
-          <div
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 8,
-              marginBottom: 20,
-            }}
-          >
-            {rounds.map((r, i) => (
-              <div
-                key={i}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  fontSize: 14,
-                  color: 'var(--text-dim)',
-                }}
-              >
-                <span>Round {i + 1}</span>
-                <span>{MOD_LABEL[r.modType]}</span>
-                <span style={{ fontWeight: 600, color: 'var(--text)' }}>
-                  {r.score.toFixed(0)}
-                </span>
-              </div>
-            ))}
-          </div>
+          {!isEndless && (
+            <div
+              style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 20 }}
+            >
+              {rounds.map((r, i) => (
+                <div
+                  key={i}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    fontSize: 14,
+                    color: 'var(--text-dim)',
+                  }}
+                >
+                  <span>Round {i + 1}</span>
+                  <span>{MOD_LABEL[r.modType]}</span>
+                  <span style={{ fontWeight: 600, color: 'var(--text)' }}>
+                    {r.score.toFixed(0)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
           <div style={{ textAlign: 'center' }}>
             <div style={{ fontSize: 13, color: 'var(--text-faint)' }}>
-              AVERAGE SCORE
+              {isEndless ? 'ROUNDS SURVIVED' : 'AVERAGE SCORE'}
             </div>
             <div style={{ fontSize: 44, fontWeight: 700, margin: '4px 0 24px' }}>
-              {(rounds.reduce((s, r) => s + r.score, 0) / rounds.length).toFixed(1)}
+              {isEndless
+                ? rounds.length
+                : (rounds.reduce((s, r) => s + r.score, 0) / rounds.length).toFixed(1)}
             </div>
-            <PlayButton onClick={playAgain} label="Play again" />
+            {onPlayAgain ? (
+              <PlayButton onClick={onPlayAgain} label="Play again" />
+            ) : (
+              <div style={{ color: 'var(--text-dim)', fontSize: 14 }}>
+                Come back tomorrow for a new Daily.
+              </div>
+            )}
           </div>
-          <LocalLeaderboard runs={runs} />
+          <div style={{ textAlign: 'center', marginTop: 16 }}>
+            <LinkButton onClick={onChangeMode} label="Change mode" />
+          </div>
+          {config.mode !== 'practice' && (
+            <LocalLeaderboard
+              runs={runs}
+              formatScore={isEndless ? (s) => `${s.toFixed(0)} rounds` : undefined}
+            />
+          )}
         </div>
       )}
-    </GameShell>
+    </div>
   )
 }
 
@@ -366,6 +535,37 @@ function RoundProgress({ index, total }: { index: number; total: number }) {
           }}
         />
       ))}
+    </div>
+  )
+}
+
+function EndlessHud({ round, lives }: { round: number; lives: number }) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 16,
+        marginBottom: 16,
+        fontSize: 13,
+        color: 'var(--text-dim)',
+      }}
+    >
+      <span>Round {round}</span>
+      <span style={{ display: 'flex', gap: 4 }}>
+        {Array.from({ length: ENDLESS_LIVES }).map((_, i) => (
+          <span
+            key={i}
+            style={{
+              width: 8,
+              height: 8,
+              borderRadius: '50%',
+              background: i < lives ? 'var(--danger)' : 'var(--border)',
+            }}
+          />
+        ))}
+      </span>
     </div>
   )
 }
@@ -457,6 +657,24 @@ function PlayButton({ onClick, label }: { onClick: () => void; label: string }) 
         fontSize: 16,
         fontWeight: 600,
         cursor: 'pointer',
+      }}
+    >
+      {label}
+    </button>
+  )
+}
+
+function LinkButton({ onClick, label }: { onClick: () => void; label: string }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        background: 'none',
+        border: 'none',
+        color: 'var(--text-faint)',
+        fontSize: 13,
+        cursor: 'pointer',
+        textDecoration: 'underline',
       }}
     >
       {label}
