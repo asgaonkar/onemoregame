@@ -33,13 +33,6 @@ export const games: GameMeta[] = [
     status: 'live',
   },
   {
-    id: 'perfect-circle',
-    name: 'Perfect Circle',
-    tagline: 'Draw a circle freehand. Scored on geometry.',
-    category: 'Precision',
-    status: 'live',
-  },
-  {
     id: 'center',
     name: 'Center',
     tagline: 'Click the exact center. Scored to the pixel.',
@@ -50,13 +43,6 @@ export const games: GameMeta[] = [
     id: 'wait',
     name: 'Wait',
     tagline: 'Stop the timer on an exact target.',
-    category: 'Timing',
-    status: 'live',
-  },
-  {
-    id: 'predict',
-    name: 'Predict',
-    tagline: 'Watch it move, then call where it stops.',
     category: 'Timing',
     status: 'live',
   },

@@ -6,10 +6,8 @@ import { WaitGame } from './pages/games/WaitGame'
 import { GuessDistanceGame } from './pages/games/GuessDistanceGame'
 import { BlinkGame } from './pages/games/BlinkGame'
 import { CountGame } from './pages/games/CountGame'
-import { PredictGame } from './pages/games/PredictGame'
 import { SwapGame } from './pages/games/SwapGame'
 import { CrowdGame } from './pages/games/CrowdGame'
-import { PerfectCircleGame } from './pages/games/PerfectCircleGame'
 import { TraceGame } from './pages/games/TraceGame'
 import { NotFound } from './pages/NotFound'
 
@@ -24,10 +22,8 @@ export function App() {
           <Route path="/guess-distance" element={<GuessDistanceGame />} />
           <Route path="/blink" element={<BlinkGame />} />
           <Route path="/count" element={<CountGame />} />
-          <Route path="/predict" element={<PredictGame />} />
           <Route path="/swap" element={<SwapGame />} />
           <Route path="/crowd" element={<CrowdGame />} />
-          <Route path="/perfect-circle" element={<PerfectCircleGame />} />
           <Route path="/trace" element={<TraceGame />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
