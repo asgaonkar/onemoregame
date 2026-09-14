@@ -215,6 +215,10 @@ const MOD_LABEL: Record<ModType, string> = {
   size: 'Changed size',
 }
 
+// Pause between the first blink (original) and the second blink (modified),
+// giving the two flashes a real gap instead of a snappy sub-second flicker.
+const BLINK_GAP_MS = 1500
+
 export function BlinkGame() {
   const [config, setConfig] = useState<RunConfig | null>(null)
 
@@ -274,7 +278,7 @@ function BlinkRun({
   const isEndless = config.mode === 'endless'
 
   const [phase, setPhase] = useState<
-    'intro' | 'preview' | 'guessing' | 'roundResult' | 'done'
+    'intro' | 'preview' | 'blank' | 'preview2' | 'guessing' | 'roundResult' | 'done'
   >('intro')
   const [rounds, setRounds] = useState<Round[]>([])
   const [lives, setLives] = useState(ENDLESS_LIVES)
@@ -283,10 +287,22 @@ function BlinkRun({
   const currentIndex = rounds.length - 1
   const current = rounds[currentIndex]
 
+  // Two-blink flash sequence: original (preview) -> blank gap -> modified
+  // (preview2) -> interactive guessing. Each timed phase advances itself.
   useEffect(() => {
-    if (phase !== 'preview' || !current) return
-    const timer = setTimeout(() => setPhase('guessing'), current.previewMs)
-    return () => clearTimeout(timer)
+    if (!current) return
+    if (phase === 'preview') {
+      const timer = setTimeout(() => setPhase('blank'), current.previewMs)
+      return () => clearTimeout(timer)
+    }
+    if (phase === 'blank') {
+      const timer = setTimeout(() => setPhase('preview2'), BLINK_GAP_MS)
+      return () => clearTimeout(timer)
+    }
+    if (phase === 'preview2') {
+      const timer = setTimeout(() => setPhase('guessing'), current.previewMs)
+      return () => clearTimeout(timer)
+    }
   }, [phase, currentIndex, current])
 
   function makeRound(roundNum: number): Round {
@@ -375,7 +391,11 @@ function BlinkRun({
         </div>
       )}
 
-      {(phase === 'preview' || phase === 'guessing' || phase === 'roundResult') &&
+      {(phase === 'preview' ||
+        phase === 'blank' ||
+        phase === 'preview2' ||
+        phase === 'guessing' ||
+        phase === 'roundResult') &&
         current && (
           <div>
             {isEndless ? (
@@ -396,6 +416,7 @@ function BlinkRun({
               }}
             >
               {phase === 'preview' && 'Memorize'}
+              {phase === 'preview2' && 'Look again'}
               {phase === 'guessing' && 'What changed?'}
               {phase === 'roundResult' && (current.hit ? 'Nice catch' : 'Missed it')}
             </div>
@@ -413,11 +434,12 @@ function BlinkRun({
                 touchAction: 'manipulation',
               }}
             >
-              {(phase === 'preview' ? current.shapes : current.modifiedShapes).map(
-                (s) => (
-                  <ShapeView key={s.id} shape={s} />
-                ),
-              )}
+              {phase !== 'blank' &&
+                (phase === 'preview' ? current.shapes : current.modifiedShapes).map(
+                  (s) => (
+                    <ShapeView key={s.id} shape={s} />
+                  ),
+                )}
 
               {phase === 'roundResult' && (
                 <>
