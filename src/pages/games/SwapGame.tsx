@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { GameShell } from '../../components/GameShell'
 import { GameModeSelect } from '../../components/GameModeSelect'
 import { VsSequencer } from '../../components/VsSequencer'
@@ -183,6 +183,9 @@ function SwapRun({
 
   const currentIndex = rounds.length - 1
   const current = rounds[currentIndex]
+  // Guards against a round being scored twice — e.g. a rapid double-tap on
+  // a slot before React re-renders and `current.guessSlot` reflects it.
+  const processedRef = useRef(-1)
 
   // Phase 1: show the target token, stationary, for a beat.
   useEffect(() => {
@@ -235,7 +238,14 @@ function SwapRun({
   }
 
   function handleSlotClick(slotIndex: number) {
-    if (phase !== 'guessing' || !current || current.guessSlot !== null) return
+    if (
+      phase !== 'guessing' ||
+      !current ||
+      current.guessSlot !== null ||
+      processedRef.current === currentIndex
+    )
+      return
+    processedRef.current = currentIndex
     const score =
       slotIndex === current.correctSlot
         ? Math.round(CORRECT_SCORE_MIN + (CORRECT_SCORE_MAX - CORRECT_SCORE_MIN) * current.t)

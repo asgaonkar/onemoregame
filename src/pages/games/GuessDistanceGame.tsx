@@ -176,6 +176,9 @@ function GuessDistanceRun({
 
   const currentIndex = rounds.length - 1
   const current = rounds[currentIndex]
+  // Guards against a round being scored twice — e.g. a rapid double-tap on
+  // "Lock in guess" before React re-renders and `phase` reflects the change.
+  const processedRef = useRef(-1)
 
   useEffect(() => {
     if (phase !== 'showing' || !current) return
@@ -216,7 +219,14 @@ function GuessDistanceRun({
   }
 
   function submitGuess() {
-    if (!current || phase !== 'guessing' || current.actualDistance === null) return
+    if (
+      !current ||
+      phase !== 'guessing' ||
+      current.actualDistance === null ||
+      processedRef.current === currentIndex
+    )
+      return
+    processedRef.current = currentIndex
     const guessedDistance = Math.max(0, Math.round(guessDraft))
     const score = scoreFor(current.actualDistance, guessedDistance, current.diagonal)
     setRounds((rs) =>

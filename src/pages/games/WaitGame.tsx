@@ -9,7 +9,6 @@ import {
   difficultyForRound,
   ENDLESS_LIVES,
   FIXED_ROUNDS,
-  isMiss,
   markDailyPlayed,
   rngFor,
   type RunConfig,
@@ -20,33 +19,36 @@ const GAME_ID = 'wait'
 
 type Round = {
   targetMs: number
-  toleranceMs: number
   elapsedMs: number
   diffMs: number
-  score: number
 }
 
 // t: 0 (easiest) -> 1 (hardest). Harder rounds pick a target from a wider
 // range and round it to an "awkward", more precise value (fewer round
-// numbers to anchor on), and shrink the scoring tolerance.
-function makeTarget(rng: Rng, t: number): { targetMs: number; toleranceMs: number } {
+// numbers to anchor on).
+function makeTargetMs(rng: Rng, t: number): number {
   const rawMs = 2000 + rng() * 5000
   const step = 500 - 450 * t // 500ms steps when easy, down to ~50ms when hard
-  const targetMs = Math.round(rawMs / step) * step
-  const toleranceMs = 500 - 250 * t
-  return { targetMs, toleranceMs }
+  return Math.round(rawMs / step) * step
 }
 
-function emptyRound(targetMs: number, toleranceMs: number): Round {
-  return { targetMs, toleranceMs, elapsedMs: 0, diffMs: 0, score: 0 }
+// Not shown to the player — purely an internal cutoff so Endless mode still
+// has stakes ("close enough to survive"). The player only ever sees their
+// raw ms-off; there's no percentage/tolerance concept in the scoring itself.
+function endlessFailMsFor(t: number): number {
+  return 600 - 350 * t
 }
 
-function scoreFor(diffMs: number, toleranceMs: number) {
-  return Math.max(0, Math.min(100, 100 * (1 - diffMs / toleranceMs)))
+function emptyRound(targetMs: number): Round {
+  return { targetMs, elapsedMs: 0, diffMs: 0 }
 }
 
 function formatSeconds(ms: number) {
   return (ms / 1000).toFixed(3) + 's'
+}
+
+function formatMs(ms: number) {
+  return `${Math.round(ms)}ms`
 }
 
 export function WaitGame() {
@@ -114,17 +116,20 @@ function WaitRun({
   const [lives, setLives] = useState(ENDLESS_LIVES)
   const [runs, setRuns] = useState(() => getRuns(GAME_ID, config.mode))
   const startRef = useRef<number>(0)
+  // Guards against stopTimer firing twice for the same round (e.g. a rapid
+  // double-click/tap on "Stop" before React re-renders and `phase` updates).
+  const resolvedIndexRef = useRef(-1)
 
   const currentIndex = rounds.length - 1
   const current = rounds[currentIndex]
 
   function makeRound(roundNum: number): Round {
     const t = difficultyForRound(roundNum, config.mode)
-    const { targetMs, toleranceMs } = makeTarget(rng, t)
-    return emptyRound(targetMs, toleranceMs)
+    return emptyRound(makeTargetMs(rng, t))
   }
 
   function startGame() {
+    resolvedIndexRef.current = -1
     setRounds([makeRound(1)])
     setLives(ENDLESS_LIVES)
     setPhase('ready')
@@ -136,14 +141,17 @@ function WaitRun({
   }
 
   function stopTimer() {
-    if (phase !== 'running' || !current) return
+    if (phase !== 'running' || !current || resolvedIndexRef.current === currentIndex) return
+    resolvedIndexRef.current = currentIndex
     const elapsedMs = performance.now() - startRef.current
     const diffMs = Math.abs(elapsedMs - current.targetMs)
-    const score = scoreFor(diffMs, current.toleranceMs)
     setRounds((rs) =>
-      rs.map((r, i) => (i === currentIndex ? { ...r, elapsedMs, diffMs, score } : r)),
+      rs.map((r, i) => (i === currentIndex ? { ...r, elapsedMs, diffMs } : r)),
     )
-    if (isEndless && isMiss(score)) setLives((l) => l - 1)
+    if (isEndless) {
+      const t = difficultyForRound(rounds.length, config.mode)
+      if (diffMs > endlessFailMsFor(t)) setLives((l) => l - 1)
+    }
     setPhase('roundResult')
   }
 
@@ -153,7 +161,12 @@ function WaitRun({
       return
     }
     if (config.mode === 'daily') markDailyPlayed(GAME_ID, finalScore)
-    if (config.mode !== 'practice') setRuns(addRun(GAME_ID, config.mode, finalScore))
+    if (config.mode !== 'practice') {
+      // Endless's final score is "rounds survived" (higher is better, like
+      // every other game's Endless). Fixed-round modes score by average
+      // ms-off (lower is better) — flip the leaderboard sort for those.
+      setRuns(addRun(GAME_ID, config.mode, finalScore, { ascending: !isEndless }))
+    }
     setPhase('done')
   }
 
@@ -163,14 +176,16 @@ function WaitRun({
         finish(rounds.length)
         return
       }
+      resolvedIndexRef.current = -1
       setRounds((rs) => [...rs, makeRound(rs.length + 1)])
       setPhase('ready')
       return
     }
     if (rounds.length >= FIXED_ROUNDS) {
-      finish(rounds.reduce((s, r) => s + r.score, 0) / rounds.length)
+      finish(rounds.reduce((s, r) => s + r.diffMs, 0) / rounds.length)
       return
     }
+    resolvedIndexRef.current = -1
     setRounds((rs) => [...rs, makeRound(rs.length + 1)])
     setPhase('ready')
   }
@@ -193,10 +208,10 @@ function WaitRun({
             {modeLabel(config)}
           </div>
           <p style={{ color: 'var(--text-dim)', maxWidth: 420, margin: '0 auto 28px' }}>
-            Stop the timer on the exact target.{' '}
+            Stop the timer on the exact target. Lowest total time off wins.{' '}
             {isEndless
               ? `${ENDLESS_LIVES} lives — it gets harder the longer you survive.`
-              : `${FIXED_ROUNDS} rounds, scored by how close you land.`}
+              : `${FIXED_ROUNDS} rounds.`}
           </p>
           <PlayButton onClick={startGame} label="Start" />
         </div>
@@ -213,11 +228,8 @@ function WaitRun({
 
             <div style={{ textAlign: 'center' }}>
               <div style={{ fontSize: 13, color: 'var(--text-faint)' }}>TARGET</div>
-              <div style={{ fontSize: 28, fontWeight: 700, margin: '4px 0 2px' }}>
+              <div style={{ fontSize: 28, fontWeight: 700, margin: '4px 0 24px' }}>
                 {formatSeconds(current.targetMs)}
-              </div>
-              <div style={{ fontSize: 12, color: 'var(--text-faint)', margin: '0 0 24px' }}>
-                ±{current.toleranceMs}ms tolerance
               </div>
             </div>
 
@@ -243,9 +255,6 @@ function WaitRun({
                   <div style={{ fontSize: 32, fontWeight: 700, margin: '4px 0 8px' }}>
                     {formatSeconds(current.elapsedMs)}
                   </div>
-                  <div style={{ fontSize: 15, color: 'var(--text-dim)' }}>
-                    {current.diffMs.toFixed(0)}ms off
-                  </div>
                 </div>
               )}
             </div>
@@ -258,10 +267,8 @@ function WaitRun({
               {phase === 'roundResult' && (
                 <>
                   <div style={{ fontSize: 32, fontWeight: 700, margin: '4px 0 20px' }}>
-                    {current.score.toFixed(1)}
-                    <span style={{ fontSize: 16, color: 'var(--text-faint)' }}>
-                      /100
-                    </span>
+                    {formatMs(current.diffMs)}
+                    <span style={{ fontSize: 16, color: 'var(--text-faint)' }}> off</span>
                   </div>
                   <PlayButton
                     onClick={nextRound}
@@ -292,9 +299,8 @@ function WaitRun({
                 >
                   <span>Round {i + 1}</span>
                   <span>{formatSeconds(r.targetMs)} target</span>
-                  <span>{r.diffMs.toFixed(0)}ms off</span>
                   <span style={{ fontWeight: 600, color: 'var(--text)' }}>
-                    {r.score.toFixed(1)}
+                    {formatMs(r.diffMs)} off
                   </span>
                 </div>
               ))}
@@ -302,12 +308,12 @@ function WaitRun({
           )}
           <div style={{ textAlign: 'center' }}>
             <div style={{ fontSize: 13, color: 'var(--text-faint)' }}>
-              {isEndless ? 'ROUNDS SURVIVED' : 'AVERAGE SCORE'}
+              {isEndless ? 'ROUNDS SURVIVED' : 'AVERAGE TIME OFF'}
             </div>
             <div style={{ fontSize: 44, fontWeight: 700, margin: '4px 0 24px' }}>
               {isEndless
                 ? rounds.length
-                : (rounds.reduce((s, r) => s + r.score, 0) / rounds.length).toFixed(1)}
+                : formatMs(rounds.reduce((s, r) => s + r.diffMs, 0) / rounds.length)}
             </div>
             {onPlayAgain ? (
               <PlayButton onClick={onPlayAgain} label="Play again" />
@@ -323,7 +329,7 @@ function WaitRun({
           {config.mode !== 'practice' && (
             <LocalLeaderboard
               runs={runs}
-              formatScore={isEndless ? (s) => `${s.toFixed(0)} rounds` : undefined}
+              formatScore={isEndless ? (s) => `${s.toFixed(0)} rounds` : (s) => formatMs(s)}
             />
           )}
         </div>

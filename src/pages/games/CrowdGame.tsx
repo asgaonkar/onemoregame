@@ -189,6 +189,9 @@ function CrowdRun({
 
   const currentIndex = rounds.length - 1
   const current = rounds[currentIndex]
+  // Guards against a round being scored twice — e.g. a rapid double-tap on
+  // the board before React re-renders and `stage`/`phase` reflect the change.
+  const processedRef = useRef(-1)
 
   function clearTimers() {
     if (highlightTimeoutRef.current) {
@@ -251,7 +254,14 @@ function CrowdRun({
   }
 
   function handleBoardClick(e: React.MouseEvent<HTMLDivElement>) {
-    if (phase !== 'playing' || stage !== 'guessing' || !current) return
+    if (
+      phase !== 'playing' ||
+      stage !== 'guessing' ||
+      !current ||
+      processedRef.current === currentIndex
+    )
+      return
+    processedRef.current = currentIndex
     const rect = e.currentTarget.getBoundingClientRect()
     const xPct = ((e.clientX - rect.left) / rect.width) * 100
     const yPct = ((e.clientY - rect.top) / rect.height) * 100

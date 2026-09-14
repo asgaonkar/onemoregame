@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { GameShell } from '../../components/GameShell'
 import { GameModeSelect } from '../../components/GameModeSelect'
 import { VsSequencer } from '../../components/VsSequencer'
@@ -139,6 +139,9 @@ function CountRun({
 
   const currentIndex = rounds.length - 1
   const current = rounds[currentIndex]
+  // Guards against a round being scored twice — e.g. a rapid double-tap on
+  // "Lock in guess" before React re-renders and `phase` reflects the change.
+  const processedRef = useRef(-1)
 
   function makeRound(roundNum: number): Round {
     const t = difficultyForRound(roundNum, config.mode)
@@ -164,7 +167,8 @@ function CountRun({
   }
 
   function submitGuess() {
-    if (!current || phase !== 'guessing') return
+    if (!current || phase !== 'guessing' || processedRef.current === currentIndex) return
+    processedRef.current = currentIndex
     const guess = Math.max(0, Math.round(guessDraft))
     const diff = Math.abs(guess - current.count)
     const score = Math.max(0, Math.min(100, 100 * (1 - diff / current.count)))

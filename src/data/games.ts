@@ -7,12 +7,25 @@ export type GameCategory =
 
 export type GameStatus = 'live' | 'soon'
 
+// How simple the RULES are to grasp at a glance — not how hard the game is
+// to score well at (that's the separate, dynamic per-round difficulty ramp
+// every game already has). A game can be "easy" here and still get brutally
+// hard in Endless mode.
+export type GameComplexity = 'easy' | 'medium' | 'hard'
+
+// Which input the game plays best with. 'both' means it works equally well
+// with a mouse/trackpad or a touchscreen; 'mouse'/'touch' flags a game that's
+// noticeably more precise or comfortable on that input type specifically.
+export type BestOn = 'both' | 'mouse' | 'touch'
+
 export type GameMeta = {
   id: string
   name: string
   tagline: string
   category: GameCategory
   status: GameStatus
+  complexity: GameComplexity
+  bestOn: BestOn
 }
 
 export const games: GameMeta[] = [
@@ -22,6 +35,8 @@ export const games: GameMeta[] = [
     tagline: 'Watch a path, then redraw it from memory.',
     category: 'Memory',
     status: 'live',
+    complexity: 'medium',
+    bestOn: 'both',
   },
   {
     id: 'swap',
@@ -29,6 +44,8 @@ export const games: GameMeta[] = [
     tagline: 'Objects swap places fast. Find where one ended up.',
     category: 'Memory',
     status: 'live',
+    complexity: 'medium',
+    bestOn: 'both',
   },
   {
     id: 'guess-distance',
@@ -36,6 +53,8 @@ export const games: GameMeta[] = [
     tagline: 'Two points flash briefly. Recall the gap between them.',
     category: 'Memory',
     status: 'live',
+    complexity: 'medium',
+    bestOn: 'both',
   },
   {
     id: 'center',
@@ -43,6 +62,8 @@ export const games: GameMeta[] = [
     tagline: 'Click the exact center. Scored to the pixel.',
     category: 'Precision',
     status: 'live',
+    complexity: 'easy',
+    bestOn: 'both',
   },
   {
     id: 'wait',
@@ -50,6 +71,8 @@ export const games: GameMeta[] = [
     tagline: 'Stop the timer on an exact target.',
     category: 'Timing',
     status: 'live',
+    complexity: 'easy',
+    bestOn: 'both',
   },
   {
     id: 'crowd',
@@ -57,6 +80,8 @@ export const games: GameMeta[] = [
     tagline: 'Track one dot through a moving crowd.',
     category: 'Perception',
     status: 'live',
+    complexity: 'medium',
+    bestOn: 'mouse',
   },
   {
     id: 'blink',
@@ -64,6 +89,8 @@ export const games: GameMeta[] = [
     tagline: 'Spot what changed between two flashes.',
     category: 'Perception',
     status: 'live',
+    complexity: 'easy',
+    bestOn: 'both',
   },
   {
     id: 'count',
@@ -71,6 +98,8 @@ export const games: GameMeta[] = [
     tagline: 'A crowd of objects flashes by. How many?',
     category: 'Perception',
     status: 'live',
+    complexity: 'easy',
+    bestOn: 'both',
   },
   {
     id: 'mirror',
@@ -78,6 +107,8 @@ export const games: GameMeta[] = [
     tagline: 'Memorize the pattern, then recreate its mirror image.',
     category: 'Memory',
     status: 'live',
+    complexity: 'hard',
+    bestOn: 'both',
   },
   {
     id: 'reflex',
@@ -85,6 +116,8 @@ export const games: GameMeta[] = [
     tagline: 'Wait for it, then click as fast as you can.',
     category: 'Timing',
     status: 'live',
+    complexity: 'easy',
+    bestOn: 'mouse',
   },
   {
     id: 'sequence',
@@ -92,6 +125,8 @@ export const games: GameMeta[] = [
     tagline: 'Watch the sequence, then repeat it back.',
     category: 'Memory',
     status: 'live',
+    complexity: 'easy',
+    bestOn: 'both',
   },
   {
     id: 'aim',
@@ -99,6 +134,8 @@ export const games: GameMeta[] = [
     tagline: 'Click as many targets as you can before time runs out.',
     category: 'Precision',
     status: 'live',
+    complexity: 'easy',
+    bestOn: 'mouse',
   },
   {
     id: 'risk',
@@ -106,6 +143,8 @@ export const games: GameMeta[] = [
     tagline: 'Cash out, or push your luck for more.',
     category: 'Strategy',
     status: 'live',
+    complexity: 'medium',
+    bestOn: 'both',
   },
   {
     id: 'match',
@@ -113,13 +152,8 @@ export const games: GameMeta[] = [
     tagline: 'Flip cards to find every matching pair.',
     category: 'Memory',
     status: 'live',
-  },
-  {
-    id: 'flash',
-    name: 'Flash',
-    tagline: 'A scene flashes by. Answer fast before it fades.',
-    category: 'Perception',
-    status: 'live',
+    complexity: 'easy',
+    bestOn: 'both',
   },
 ]
 

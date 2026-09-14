@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { GameShell } from '../../components/GameShell'
 import { GameModeSelect } from '../../components/GameModeSelect'
 import { VsSequencer } from '../../components/VsSequencer'
@@ -286,6 +286,9 @@ function BlinkRun({
 
   const currentIndex = rounds.length - 1
   const current = rounds[currentIndex]
+  // Guards against a round being scored twice — e.g. a rapid double-tap on
+  // the board before React re-renders and `current.guess` reflects it.
+  const processedRef = useRef(-1)
 
   // Two-blink flash sequence: original (preview) -> blank gap -> modified
   // (preview2) -> interactive guessing. Each timed phase advances itself.
@@ -316,7 +319,14 @@ function BlinkRun({
   }
 
   function handleBoardClick(e: React.MouseEvent<HTMLDivElement>) {
-    if (phase !== 'guessing' || !current || current.guess) return
+    if (
+      phase !== 'guessing' ||
+      !current ||
+      current.guess ||
+      processedRef.current === currentIndex
+    )
+      return
+    processedRef.current = currentIndex
     const rect = e.currentTarget.getBoundingClientRect()
     const xPct = ((e.clientX - rect.left) / rect.width) * 100
     const yPct = ((e.clientY - rect.top) / rect.height) * 100

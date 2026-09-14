@@ -9,7 +9,6 @@ import {
   difficultyForRound,
   ENDLESS_LIVES,
   FIXED_ROUNDS,
-  isMiss,
   markDailyPlayed,
   rngFor,
   type GameMode,
@@ -18,6 +17,10 @@ import {
 import type { Rng } from '../../lib/rng'
 
 const GAME_ID = 'reflex'
+// Sentinel "time" for a failed round (false start / timeout) — worse than any
+// real reaction, so it naturally drags a run's average down without needing
+// a separate 0-100 score concept. Lower is always better here.
+const FAIL_MS = 2000
 
 type Outcome = 'pending' | 'hit' | 'falseStart' | 'timeout'
 
@@ -30,7 +33,6 @@ type Round = {
   y: number // target center, percentage of board height
   outcome: Outcome
   reactionMs: number
-  score: number
 }
 
 function lerp(a: number, b: number, t: number): number {
@@ -47,8 +49,14 @@ function maxResponseMsFor(t: number): number {
   return lerp(1200, 550, t)
 }
 
-function scoreForReaction(reactionMs: number): number {
-  return Math.max(0, Math.min(100, 100 * (1 - (reactionMs - 120) / 380)))
+// The "score" for a round is just its time in ms — lower is better — except
+// failures, which are penalized with a fixed worst-case sentinel.
+function timeFor(round: Round): number {
+  return round.outcome === 'hit' ? round.reactionMs : FAIL_MS
+}
+
+function formatMs(ms: number): string {
+  return `${Math.round(ms)}ms`
 }
 
 function makeRound(rng: Rng, roundNum: number, mode: GameMode): Round {
@@ -67,14 +75,13 @@ function makeRound(rng: Rng, roundNum: number, mode: GameMode): Round {
     y,
     outcome: 'pending',
     reactionMs: 0,
-    score: 0,
   }
 }
 
 function resultMessage(round: Round): string {
   if (round.outcome === 'falseStart') return 'Too soon!'
   if (round.outcome === 'timeout') return 'Too slow!'
-  return `${round.reactionMs.toFixed(0)}ms`
+  return formatMs(round.reactionMs)
 }
 
 export function ReflexGame() {
@@ -145,6 +152,10 @@ function ReflexRun({
   const appearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const timeoutTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const appearAtRef = useRef(0)
+  // Guards against a round being finished twice — e.g. a timeout timer firing
+  // in the same tick as a click, or a rapid double-click/tap before React
+  // re-renders and `phase` reflects the change. Reset per round.
+  const finishedIndexRef = useRef(-1)
 
   const currentIndex = rounds.length - 1
   const current = rounds[currentIndex]
@@ -168,25 +179,23 @@ function ReflexRun({
       appearAtRef.current = performance.now()
       setPhase('live')
       timeoutTimerRef.current = setTimeout(() => {
-        finishRoundWithOutcome(idx, 'timeout', 0, 0)
+        finishRoundWithOutcome(idx, 'timeout', 0)
       }, round.maxResponseMs)
     }, round.waitMs)
   }
 
-  function finishRoundWithOutcome(
-    idx: number,
-    outcome: Outcome,
-    reactionMs: number,
-    score: number,
-  ) {
+  function finishRoundWithOutcome(idx: number, outcome: Outcome, reactionMs: number) {
+    if (finishedIndexRef.current === idx) return
+    finishedIndexRef.current = idx
     clearTimers()
-    setRounds((rs) => rs.map((r, i) => (i === idx ? { ...r, outcome, reactionMs, score } : r)))
-    if (isEndless && isMiss(score)) setLives((l) => l - 1)
+    setRounds((rs) => rs.map((r, i) => (i === idx ? { ...r, outcome, reactionMs } : r)))
+    if (isEndless && outcome !== 'hit') setLives((l) => l - 1)
     setPhase('roundResult')
   }
 
   function startGame() {
     const r = makeRound(rng, 1, config.mode)
+    finishedIndexRef.current = -1
     setRounds([r])
     setLives(ENDLESS_LIVES)
     setPhase('waiting')
@@ -195,14 +204,13 @@ function ReflexRun({
 
   function handleFalseStart() {
     if (phase !== 'waiting') return
-    finishRoundWithOutcome(currentIndex, 'falseStart', 0, 0)
+    finishRoundWithOutcome(currentIndex, 'falseStart', 0)
   }
 
   function handleTargetClick() {
     if (phase !== 'live') return
     const reactionMs = performance.now() - appearAtRef.current
-    const score = scoreForReaction(reactionMs)
-    finishRoundWithOutcome(currentIndex, 'hit', reactionMs, score)
+    finishRoundWithOutcome(currentIndex, 'hit', reactionMs)
   }
 
   function finish(finalScore: number) {
@@ -211,7 +219,12 @@ function ReflexRun({
       return
     }
     if (config.mode === 'daily') markDailyPlayed(GAME_ID, finalScore)
-    if (config.mode !== 'practice') setRuns(addRun(GAME_ID, config.mode, finalScore))
+    if (config.mode !== 'practice') {
+      // Endless's final score is "rounds survived" (higher is better, like
+      // every other game's Endless). Fixed-round modes score by average
+      // reaction time (lower is better) — flip the leaderboard sort for those.
+      setRuns(addRun(GAME_ID, config.mode, finalScore, { ascending: !isEndless }))
+    }
     setPhase('done')
   }
 
@@ -223,17 +236,19 @@ function ReflexRun({
       }
       const idx = rounds.length
       const r = makeRound(rng, idx + 1, config.mode)
+      finishedIndexRef.current = -1
       setRounds((rs) => [...rs, r])
       setPhase('waiting')
       scheduleWait(r, idx)
       return
     }
     if (rounds.length >= FIXED_ROUNDS) {
-      finish(rounds.reduce((s, r) => s + r.score, 0) / rounds.length)
+      finish(rounds.reduce((s, r) => s + timeFor(r), 0) / rounds.length)
       return
     }
     const idx = rounds.length
     const r = makeRound(rng, idx + 1, config.mode)
+    finishedIndexRef.current = -1
     setRounds((rs) => [...rs, r])
     setPhase('waiting')
     scheduleWait(r, idx)
@@ -258,10 +273,10 @@ function ReflexRun({
           </div>
           <p style={{ color: 'var(--text-dim)', maxWidth: 420, margin: '0 auto 28px' }}>
             A target appears at a random moment — click it the instant you see it. Click too
-            soon and it&rsquo;s a false start.{' '}
+            soon and it&rsquo;s a false start. Lowest reaction time wins.{' '}
             {isEndless
               ? `${ENDLESS_LIVES} lives — it gets harder the longer you survive.`
-              : `${FIXED_ROUNDS} rounds, scored by your reaction time.`}
+              : `${FIXED_ROUNDS} rounds.`}
           </p>
           <PlayButton onClick={startGame} label="Start" />
         </div>
@@ -329,12 +344,8 @@ function ReflexRun({
 
           {phase === 'roundResult' && (
             <div style={{ textAlign: 'center', marginTop: 20 }}>
-              <div style={{ fontSize: 15, color: 'var(--text-dim)' }}>
+              <div style={{ fontSize: 32, fontWeight: 700, margin: '20px 0' }}>
                 {resultMessage(current)}
-              </div>
-              <div style={{ fontSize: 32, fontWeight: 700, margin: '4px 0 20px' }}>
-                {current.score.toFixed(1)}
-                <span style={{ fontSize: 16, color: 'var(--text-faint)' }}>/100</span>
               </div>
               <PlayButton
                 onClick={nextRound}
@@ -363,9 +374,8 @@ function ReflexRun({
                   }}
                 >
                   <span>Round {i + 1}</span>
-                  <span>{resultMessage(r)}</span>
                   <span style={{ fontWeight: 600, color: 'var(--text)' }}>
-                    {r.score.toFixed(1)}
+                    {resultMessage(r)}
                   </span>
                 </div>
               ))}
@@ -373,12 +383,12 @@ function ReflexRun({
           )}
           <div style={{ textAlign: 'center' }}>
             <div style={{ fontSize: 13, color: 'var(--text-faint)' }}>
-              {isEndless ? 'ROUNDS SURVIVED' : 'AVERAGE SCORE'}
+              {isEndless ? 'ROUNDS SURVIVED' : 'AVERAGE TIME'}
             </div>
             <div style={{ fontSize: 44, fontWeight: 700, margin: '4px 0 24px' }}>
               {isEndless
                 ? rounds.length
-                : (rounds.reduce((s, r) => s + r.score, 0) / rounds.length).toFixed(1)}
+                : formatMs(rounds.reduce((s, r) => s + timeFor(r), 0) / rounds.length)}
             </div>
             {onPlayAgain ? (
               <PlayButton onClick={onPlayAgain} label="Play again" />
@@ -394,7 +404,7 @@ function ReflexRun({
           {config.mode !== 'practice' && (
             <LocalLeaderboard
               runs={runs}
-              formatScore={isEndless ? (s) => `${s.toFixed(0)} rounds` : undefined}
+              formatScore={isEndless ? (s) => `${s.toFixed(0)} rounds` : (s) => formatMs(s)}
             />
           )}
         </div>

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { GameShell } from '../../components/GameShell'
 import { GameModeSelect } from '../../components/GameModeSelect'
 import { VsSequencer } from '../../components/VsSequencer'
@@ -205,6 +205,9 @@ function TraceRun({
 
   const currentIndex = rounds.length - 1
   const current = rounds[currentIndex]
+  // Guards against a round being scored twice — e.g. a stray extra
+  // pointerup before React re-renders and `isDrawing` reflects the change.
+  const processedRef = useRef(-1)
 
   function makeRound(roundNum: number): Round {
     const t = difficultyForRound(roundNum, config.mode)
@@ -249,7 +252,9 @@ function TraceRun({
   }
 
   function handlePointerUp(e: React.PointerEvent<HTMLDivElement>) {
-    if (phase !== 'draw' || !isDrawing || !current) return
+    if (phase !== 'draw' || !isDrawing || !current || processedRef.current === currentIndex)
+      return
+    processedRef.current = currentIndex
     setIsDrawing(false)
     const finalPoints =
       drawing.length > 0 ? [...drawing, pointFromEvent(e)] : [pointFromEvent(e)]

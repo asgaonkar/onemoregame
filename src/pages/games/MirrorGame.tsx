@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { GameShell } from '../../components/GameShell'
 import { GameModeSelect } from '../../components/GameModeSelect'
 import { VsSequencer } from '../../components/VsSequencer'
@@ -28,7 +28,8 @@ type Point = { x: number; y: number }
 type Placement = {
   xPct: number
   yPct: number
-  distance: number // px, vs. this point's true mirrored target
+  distancePct: number // percentage-space distance vs. the true mirrored target — used for scoring
+  distancePx: number // real px at click time — display only, never affects score
   score: number
 }
 
@@ -37,16 +38,17 @@ type Round = {
   k: number
   points: Point[] // original points, left half only
   placements: Placement[] // grows one-per-click as the player places points 1..k
-  avgDist: number
+  avgDistPct: number // used for scoring — percentage-space, so it's fair across screen sizes
+  avgDistPx: number // display only
   score: number
   showDurationMs: number
 }
 
-// A "reasonable miss" ceiling in real pixels: land within this of the true
-// mirrored target and you're near-perfect, land at or beyond it and you
-// score ~0. Same formula shape as TraceGame's percentage-space ceiling, just
-// calibrated in px since Mirror's scoring works in real pixel distances.
-const MISS_CEILING_PX = 60
+// A "reasonable miss" ceiling in percentage-space (the board is 0-100 on
+// each axis, same square-board convention as CenterGame/BlinkGame). Scoring
+// in percentage-space — rather than real pixels — means the same relative
+// accuracy gets the same score regardless of the viewer's screen size.
+const MISS_CEILING_PCT = 20
 
 // t: 0 (easiest) -> 1 (hardest). More points, less time to memorize them.
 function pointCountFor(t: number): number {
@@ -82,8 +84,8 @@ function mirrorOf(p: Point): Point {
   return { x: 100 - p.x, y: p.y }
 }
 
-function scoreFromDistance(distance: number): number {
-  return Math.max(0, Math.min(100, 100 * (1 - distance / MISS_CEILING_PX)))
+function scoreFromDistancePct(distancePct: number): number {
+  return Math.max(0, Math.min(100, 100 * (1 - distancePct / MISS_CEILING_PCT)))
 }
 
 export function MirrorGame() {
@@ -153,6 +155,11 @@ function MirrorRun({
 
   const currentIndex = rounds.length - 1
   const current = rounds[currentIndex]
+  // Guards against a single placement being scored twice — e.g. a rapid
+  // double-tap before React re-renders and `current.placements` reflects the
+  // first click. Unlike single-click games, Mirror takes several clicks per
+  // round, so the guard is keyed by (round, placement index), not just round.
+  const lastProcessedRef = useRef({ roundIndex: -1, placeIndex: -1 })
 
   function makeRound(roundNum: number): Round {
     const t = difficultyForRound(roundNum, config.mode)
@@ -162,7 +169,8 @@ function MirrorRun({
       k,
       points: randomPoints(rng, k),
       placements: [],
-      avgDist: 0,
+      avgDistPct: 0,
+      avgDistPx: 0,
       score: 0,
       showDurationMs: showDurationFor(t),
     }
@@ -186,27 +194,45 @@ function MirrorRun({
     if (phase !== 'place' || !current) return
     const placeIndex = current.placements.length
     if (placeIndex >= current.k) return
+    if (
+      lastProcessedRef.current.roundIndex === currentIndex &&
+      lastProcessedRef.current.placeIndex === placeIndex
+    )
+      return
+    lastProcessedRef.current = { roundIndex: currentIndex, placeIndex }
 
     const rect = e.currentTarget.getBoundingClientRect()
     const xPct = ((e.clientX - rect.left) / rect.width) * 100
     const yPct = ((e.clientY - rect.top) / rect.height) * 100
 
     const target = mirrorOf(current.points[placeIndex])
+    // Scored in percentage-space so accuracy is judged the same regardless of
+    // the viewer's screen size; real px is computed only for display below.
+    const distancePct = Math.hypot(xPct - target.x, yPct - target.y)
     const guessPx = { x: (xPct / 100) * rect.width, y: (yPct / 100) * rect.height }
     const targetPx = { x: (target.x / 100) * rect.width, y: (target.y / 100) * rect.height }
-    const distance = Math.hypot(guessPx.x - targetPx.x, guessPx.y - targetPx.y)
-    const placement: Placement = { xPct, yPct, distance, score: scoreFromDistance(distance) }
+    const distancePx = Math.hypot(guessPx.x - targetPx.x, guessPx.y - targetPx.y)
+    const placement: Placement = {
+      xPct,
+      yPct,
+      distancePct,
+      distancePx,
+      score: scoreFromDistancePct(distancePct),
+    }
 
     const placements = [...current.placements, placement]
     const isLastPoint = placements.length >= current.k
-    const avgDist = isLastPoint
-      ? placements.reduce((s, p) => s + p.distance, 0) / placements.length
-      : current.avgDist
-    const roundScore = isLastPoint ? scoreFromDistance(avgDist) : current.score
+    const avgDistPct = isLastPoint
+      ? placements.reduce((s, p) => s + p.distancePct, 0) / placements.length
+      : current.avgDistPct
+    const avgDistPx = isLastPoint
+      ? placements.reduce((s, p) => s + p.distancePx, 0) / placements.length
+      : current.avgDistPx
+    const roundScore = isLastPoint ? scoreFromDistancePct(avgDistPct) : current.score
 
     setRounds((rs) =>
       rs.map((r, i) =>
-        i === currentIndex ? { ...r, placements, avgDist, score: roundScore } : r,
+        i === currentIndex ? { ...r, placements, avgDistPct, avgDistPx, score: roundScore } : r,
       ),
     )
 
@@ -402,7 +428,7 @@ function MirrorRun({
           {phase === 'roundResult' && (
             <div style={{ textAlign: 'center', marginTop: 20 }}>
               <div style={{ fontSize: 15, color: 'var(--text-dim)' }}>
-                {current.avgDist.toFixed(0)}px avg miss
+                {current.avgDistPx.toFixed(0)}px avg miss
               </div>
               <div style={{ fontSize: 32, fontWeight: 700, margin: '4px 0 20px' }}>
                 {current.score.toFixed(1)}
@@ -435,7 +461,7 @@ function MirrorRun({
                   }}
                 >
                   <span>Round {i + 1}</span>
-                  <span>{r.avgDist.toFixed(0)}px avg miss</span>
+                  <span>{r.avgDistPx.toFixed(0)}px avg miss</span>
                   <span style={{ fontWeight: 600, color: 'var(--text)' }}>
                     {r.score.toFixed(1)}
                   </span>

@@ -19,10 +19,20 @@ export function getRuns(gameId: string, mode: GameMode): RunRecord[] {
   return readJSON<RunRecord[]>(key(gameId, mode), [])
 }
 
-export function addRun(gameId: string, mode: GameMode, score: number): RunRecord[] {
+// Most games are "higher is better" (a 0-100 accuracy score, or rounds
+// survived in Endless). A few — anything scored directly in milliseconds,
+// like Wait/Reflex — are "lower is better". Pass `ascending: true` for those;
+// it only changes sort direction, the storage/trim logic is identical.
+export function addRun(
+  gameId: string,
+  mode: GameMode,
+  score: number,
+  options?: { ascending?: boolean },
+): RunRecord[] {
+  const ascending = options?.ascending ?? false
   const runs = getRuns(gameId, mode)
   runs.push({ score, date: new Date().toISOString() })
-  runs.sort((a, b) => b.score - a.score)
+  runs.sort((a, b) => (ascending ? a.score - b.score : b.score - a.score))
   const trimmed = runs.slice(0, MAX_RECORDS)
   writeJSON(key(gameId, mode), trimmed)
   return trimmed

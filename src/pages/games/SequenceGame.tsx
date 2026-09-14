@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { GameShell } from '../../components/GameShell'
 import { GameModeSelect } from '../../components/GameModeSelect'
 import { VsSequencer } from '../../components/VsSequencer'
@@ -99,6 +99,9 @@ function SequenceRun({
 
   const currentIndex = rounds.length - 1
   const current = rounds[currentIndex]
+  // Guards against a round being completed twice — e.g. a rapid double-tap
+  // on a tile before React re-renders and `phase` reflects the change.
+  const processedRef = useRef(-1)
 
   function makeRound(roundNum: number): Round {
     const t = difficultyForRound(roundNum, config.mode)
@@ -141,7 +144,8 @@ function SequenceRun({
   }
 
   function completeRound(correctCount: number) {
-    if (!current) return
+    if (!current || processedRef.current === currentIndex) return
+    processedRef.current = currentIndex
     const score = Math.round(100 * (correctCount / current.sequence.length))
     setRounds((rs) =>
       rs.map((r, i) => (i === currentIndex ? { ...r, correctCount, score } : r)),

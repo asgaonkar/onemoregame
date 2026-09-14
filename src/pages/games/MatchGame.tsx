@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { GameShell } from '../../components/GameShell'
 import { GameModeSelect } from '../../components/GameModeSelect'
 import { VsSequencer } from '../../components/VsSequencer'
@@ -191,6 +191,10 @@ function MatchRun({
 
   const currentIndex = rounds.length - 1
   const current = rounds[currentIndex]
+  // Guards the "second card flipped" transition against firing twice for a
+  // rapid double-tap before React re-renders and `flipped` reflects the
+  // first tap — closes the gap before `resolving`/`setFlipped` commit.
+  const flippingRef = useRef(false)
 
   function makeRound(roundNum: number): Round {
     const t = difficultyForRound(roundNum, config.mode)
@@ -202,6 +206,7 @@ function MatchRun({
     setRounds([makeRound(1)])
     setFlipped([])
     setResolving(false)
+    flippingRef.current = false
     setLives(ENDLESS_LIVES)
     setPhase('playing')
   }
@@ -227,6 +232,8 @@ function MatchRun({
       setFlipped([id])
       return
     }
+    if (flippingRef.current) return
+    flippingRef.current = true
 
     const firstId = flipped[0]
     const first = current.cards.find((c) => c.id === firstId)!
@@ -250,6 +257,7 @@ function MatchRun({
         ),
       )
       setFlipped([])
+      flippingRef.current = false
       return
     }
 
@@ -258,6 +266,7 @@ function MatchRun({
     setTimeout(() => {
       setFlipped([])
       setResolving(false)
+      flippingRef.current = false
     }, MISMATCH_PAUSE_MS)
   }
 
@@ -274,6 +283,7 @@ function MatchRun({
   function nextRound() {
     setFlipped([])
     setResolving(false)
+    flippingRef.current = false
     if (isEndless) {
       if (lives <= 0) {
         finish(rounds.length)

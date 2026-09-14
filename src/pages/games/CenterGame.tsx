@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { GameShell } from '../../components/GameShell'
 import { GameModeSelect } from '../../components/GameModeSelect'
 import { VsSequencer } from '../../components/VsSequencer'
@@ -292,6 +292,9 @@ function CenterRun({
 
   const currentIndex = rounds.length - 1
   const current = rounds[currentIndex]
+  // Guards against a round being scored twice — e.g. a rapid double-click/tap
+  // before React re-renders and `current.guess` reflects the first click.
+  const processedRef = useRef(-1)
 
   function makeRound(roundNum: number): Round {
     const t = difficultyForRound(roundNum, config.mode)
@@ -318,7 +321,9 @@ function CenterRun({
   }
 
   function handleStageClick(e: React.MouseEvent<HTMLDivElement>) {
-    if (phase !== 'playing' || !current || current.guess) return
+    if (phase !== 'playing' || !current || current.guess || processedRef.current === currentIndex)
+      return
+    processedRef.current = currentIndex
     const rect = e.currentTarget.getBoundingClientRect()
     const guess = {
       xPct: ((e.clientX - rect.left) / rect.width) * 100,

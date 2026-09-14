@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { GameShell } from '../../components/GameShell'
 import { GameModeSelect } from '../../components/GameModeSelect'
 import { VsSequencer } from '../../components/VsSequencer'
@@ -117,6 +117,12 @@ function RiskRun({
   const currentIndex = rounds.length - 1
   const current = rounds[currentIndex]
   const totalSoFar = rounds.reduce((s, r) => s + r.roundScore, 0)
+  // Guards against a single decision (Take/Push at a given step) being
+  // processed twice — e.g. a rapid double-click before React re-renders and
+  // `current.status`/`current.step` reflect the change. Push is legitimately
+  // callable multiple times per round (once per rung), so the guard is keyed
+  // by (round, step), not just round.
+  const lastProcessedRef = useRef({ roundIndex: -1, step: -1 })
 
   function startGame() {
     setRounds([makeRound(1, config.mode)])
@@ -126,6 +132,12 @@ function RiskRun({
 
   function handleTake() {
     if (!current || current.status !== 'active') return
+    if (
+      lastProcessedRef.current.roundIndex === currentIndex &&
+      lastProcessedRef.current.step === current.step
+    )
+      return
+    lastProcessedRef.current = { roundIndex: currentIndex, step: current.step }
     const score = RUNGS[current.step]
     setRounds((rs) =>
       rs.map((r, i) => (i === currentIndex ? { ...r, status: 'taken', roundScore: score } : r)),
@@ -135,6 +147,12 @@ function RiskRun({
 
   function handlePush() {
     if (!current || current.status !== 'active') return
+    if (
+      lastProcessedRef.current.roundIndex === currentIndex &&
+      lastProcessedRef.current.step === current.step
+    )
+      return
+    lastProcessedRef.current = { roundIndex: currentIndex, step: current.step }
     const bustProb = bustProbFor(current.step, current.t)
     const roll = rollBust(config.seed, current.roundNum, current.step)
     if (roll < bustProb) {
