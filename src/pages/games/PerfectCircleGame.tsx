@@ -27,36 +27,64 @@ type Round = {
   centroid: Point | null
   meanRadius: number
   score: number
+  tooSmall: boolean
   t: number // difficulty (0 easiest -> 1 hardest) this round was scored at
 }
 
 // t: 0 (easiest) -> 1 (hardest). No randomness needed to set a round up —
 // the player draws freehand — only the scoring strictness scales with t.
 function emptyRound(t: number): Round {
-  return { points: [], centroid: null, meanRadius: 0, score: 0, t }
+  return { points: [], centroid: null, meanRadius: 0, score: 0, tooSmall: false, t }
 }
 
 function avg(nums: number[]): number {
   return nums.reduce((s, n) => s + n, 0) / nums.length
 }
 
+function clamp(n: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, n))
+}
+
+// Minimum acceptable mean radius (in the 0-100 percentage-space board units)
+// for a stroke to score at all, scaling from 8 at the easiest difficulty up
+// to 18 at the hardest — a tiny scribble shouldn't be able to game the
+// coefficient-of-variation math into a "perfect" score.
+function minRadiusFor(t: number): number {
+  return 8 + 10 * t
+}
+
+// A generous but safe mean radius that comfortably fits the 100x100 board
+// (with margin for the centroid being anywhere near the middle). Circles at
+// or above this size get the full size multiplier.
+const IDEAL_MAX_RADIUS = 42
+
 // Fits a circle to the stroke (centroid + mean radius) and scores how
 // consistent the radius is across all captured points. A perfect circle has
 // zero variation; a wobbly stroke has high variation. We use the
-// coefficient of variation (stddev / mean) so the score is scale-independent
-// — a tiny circle and a huge circle drawn with the same relative wobble
-// score the same. `t` (0 easiest -> 1 hardest, from difficultyForRound)
-// scales up how harshly wobble and an unclosed loop are punished.
+// coefficient of variation (stddev / mean) so the shape portion of the score
+// is scale-independent — a tiny circle and a huge circle drawn with the same
+// relative wobble get the same shape score. `t` (0 easiest -> 1 hardest, from
+// difficultyForRound) scales up how harshly wobble and an unclosed loop are
+// punished, and also raises the minimum size requirement.
+//
+// On top of the shape score, a size multiplier rewards drawing bigger
+// circles: anything below the minimum radius scores 0 outright, and above
+// that, the multiplier ramps from 0.7 (right at the minimum) to 1.0 (at or
+// above IDEAL_MAX_RADIUS) — so a perfectly round tiny circle tops out around
+// 70, while a perfectly round large circle can hit 100. A big wobbly circle
+// can still beat a small perfect one if the size gap outweighs the
+// roundness gap — that's intentional.
 function scoreStroke(
   points: Point[],
   t: number,
-): { centroid: Point; meanRadius: number; score: number } {
+): { centroid: Point; meanRadius: number; score: number; tooSmall: boolean } {
   const centroid = { x: avg(points.map((p) => p.x)), y: avg(points.map((p) => p.y)) }
   const radii = points.map((p) => Math.hypot(p.x - centroid.x, p.y - centroid.y))
   const meanRadius = avg(radii)
+  const minRadius = minRadiusFor(t)
 
-  if (points.length < 8 || meanRadius < 4) {
-    return { centroid, meanRadius, score: 0 }
+  if (points.length < 8 || meanRadius < minRadius) {
+    return { centroid, meanRadius, score: 0, tooSmall: true }
   }
 
   const variance = avg(radii.map((r) => (r - meanRadius) ** 2))
@@ -72,9 +100,13 @@ function scoreStroke(
   const closureWeight = 40 + 20 * t
   const closureCap = 20 + 6 * t
   const closurePenalty = Math.min(closureCap, gapRatio * closureWeight)
-  const score = Math.max(0, Math.min(100, 100 - cvPenalty - closurePenalty))
+  const shapeScore = clamp(100 - cvPenalty - closurePenalty, 0, 100)
 
-  return { centroid, meanRadius, score }
+  const sizeFactor = clamp((meanRadius - minRadius) / (IDEAL_MAX_RADIUS - minRadius), 0, 1)
+  const sizeMultiplier = 0.7 + 0.3 * sizeFactor
+  const score = clamp(shapeScore * sizeMultiplier, 0, 100)
+
+  return { centroid, meanRadius, score, tooSmall: false }
 }
 
 function pathFrom(points: Point[]): string {
@@ -201,9 +233,11 @@ function PerfectCircleRun({
 
   function finishStroke(points: Point[]) {
     if (points.length < 2 || !current) return
-    const { centroid, meanRadius, score } = scoreStroke(points, current.t)
+    const { centroid, meanRadius, score, tooSmall } = scoreStroke(points, current.t)
     setRounds((rs) =>
-      rs.map((r, i) => (i === currentIndex ? { ...r, points, centroid, meanRadius, score } : r)),
+      rs.map((r, i) =>
+        i === currentIndex ? { ...r, points, centroid, meanRadius, score, tooSmall } : r,
+      ),
     )
     if (isEndless && isMiss(score)) setLives((l) => l - 1)
     setPhase('roundResult')
@@ -305,6 +339,18 @@ function PerfectCircleRun({
               height="100%"
               style={{ display: 'block' }}
             >
+              {phase === 'playing' && livePoints.length === 0 && (
+                <circle
+                  cx={50}
+                  cy={50}
+                  r={minRadiusFor(current.t)}
+                  fill="none"
+                  stroke="var(--text-faint)"
+                  strokeWidth={0.5}
+                  strokeDasharray="2.5 2.5"
+                  opacity={0.4}
+                />
+              )}
               {phase === 'roundResult' && current.centroid && (
                 <circle
                   cx={current.centroid.x}
@@ -340,10 +386,21 @@ function PerfectCircleRun({
 
           {phase === 'roundResult' && (
             <div style={{ textAlign: 'center', marginTop: 20 }}>
-              <div style={{ fontSize: 32, fontWeight: 700, margin: '4px 0 20px' }}>
+              <div style={{ fontSize: 32, fontWeight: 700, margin: '4px 0 4px' }}>
                 {current.score.toFixed(1)}
                 <span style={{ fontSize: 16, color: 'var(--text-faint)' }}>/100</span>
               </div>
+              {current.tooSmall ? (
+                <div style={{ fontSize: 14, color: 'var(--danger)', margin: '0 0 20px' }}>
+                  Too small — draw at least this big
+                </div>
+              ) : (
+                <div
+                  style={{ fontSize: 12, color: 'var(--text-faint)', margin: '0 0 20px' }}
+                >
+                  radius {current.meanRadius.toFixed(0)} vs min {minRadiusFor(current.t).toFixed(0)}
+                </div>
+              )}
               <PlayButton
                 onClick={nextRound}
                 label={isRunOver ? 'See results' : 'Next round'}
