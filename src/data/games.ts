@@ -72,6 +72,13 @@ export const games: GameMeta[] = [
     category: 'Perception',
     status: 'live',
   },
+  {
+    id: 'reflex',
+    name: 'Reflex',
+    tagline: 'Wait for it, then click as fast as you can.',
+    category: 'Timing',
+    status: 'live',
+  },
 ]
 
 export const categoryOrder: GameCategory[] = [
