@@ -72,6 +72,13 @@ export const games: GameMeta[] = [
     category: 'Perception',
     status: 'live',
   },
+  {
+    id: 'match',
+    name: 'Match',
+    tagline: 'Flip cards to find every matching pair.',
+    category: 'Memory',
+    status: 'live',
+  },
 ]
 
 export const categoryOrder: GameCategory[] = [
