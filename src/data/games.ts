@@ -1,4 +1,9 @@
-export type GameCategory = 'Memory' | 'Precision' | 'Timing' | 'Perception'
+export type GameCategory =
+  | 'Memory'
+  | 'Precision'
+  | 'Timing'
+  | 'Perception'
+  | 'Strategy'
 
 export type GameStatus = 'live' | 'soon'
 
@@ -74,6 +79,7 @@ export const categoryOrder: GameCategory[] = [
   'Precision',
   'Timing',
   'Perception',
+  'Strategy',
 ]
 
 export function getGame(id: string): GameMeta | undefined {
