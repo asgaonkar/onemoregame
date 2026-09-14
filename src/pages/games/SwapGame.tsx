@@ -191,10 +191,13 @@ function SwapRun({
     return () => clearTimeout(t)
   }, [phase, current])
 
-  // Phase 2: replay the swap sequence step by step, then hide the
-  // highlight and hand control to the player.
+  // Phase 2: hide the highlight the instant swapping starts — otherwise the
+  // target stays visually distinguishable through every swap and can just be
+  // watched instead of tracked from memory. Then replay the swap sequence
+  // step by step.
   useEffect(() => {
     if (phase !== 'swapping' || !current) return
+    setHighlightOn(false)
     const timeouts: ReturnType<typeof setTimeout>[] = []
 
     current.swaps.forEach(([a, b], i) => {
@@ -213,7 +216,6 @@ function SwapRun({
 
     const finalTimeout = setTimeout(
       () => {
-        setHighlightOn(false)
         setPhase('guessing')
       },
       current.swaps.length * current.swapStepMs + SETTLE_MS,
