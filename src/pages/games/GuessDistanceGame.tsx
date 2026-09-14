@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { GameShell } from '../../components/GameShell'
 import { GameModeSelect } from '../../components/GameModeSelect'
 import { VsSequencer } from '../../components/VsSequencer'
@@ -20,18 +20,23 @@ const GAME_ID = 'guess-distance'
 
 // Points live in percentage-space (0-100), same trick as CenterGame: nothing
 // that needs the board's real pixel size exists on the intro screen, so we
-// generate layouts as percentages and only convert to px inside the click
-// handler, where the board already exists and getBoundingClientRect works.
+// generate layouts as percentages and only convert to real px once the board
+// has mounted and getBoundingClientRect works (see the boardRef effect below).
 type Point = { x: number; y: number }
 
 type Round = {
   anchor: Point
   target: Point
-  guess: Point | null
-  actualDistance: number
-  guessedDistance: number
+  // Filled in by the boardRef effect once the board has mounted and its real
+  // pixel size is known. null means "not computed yet".
+  actualDistance: number | null
+  diagonal: number
+  hintLo: number
+  hintHi: number
+  guessedDistance: number | null
   score: number
   flashMs: number
+  t: number
 }
 
 function randomPoint(rng: Rng): Point {
@@ -66,11 +71,14 @@ function emptyRound(rng: Rng, t: number): Round {
   return {
     anchor,
     target,
-    guess: null,
-    actualDistance: 0,
-    guessedDistance: 0,
+    actualDistance: null,
+    diagonal: 0,
+    hintLo: 0,
+    hintHi: 0,
+    guessedDistance: null,
     score: 0,
     flashMs: flashMsFor(t),
+    t,
   }
 }
 
@@ -78,16 +86,20 @@ function toPx(p: Point, rectW: number, rectH: number) {
   return { x: (p.x / 100) * rectW, y: (p.y / 100) * rectH }
 }
 
-function scoreFor(round: Round, guess: Point, rectW: number, rectH: number) {
-  const diagonal = Math.hypot(rectW, rectH)
-  const anchorPx = toPx(round.anchor, rectW, rectH)
-  const targetPx = toPx(round.target, rectW, rectH)
-  const guessPx = toPx(guess, rectW, rectH)
-  const actualDistance = Math.hypot(targetPx.x - anchorPx.x, targetPx.y - anchorPx.y)
-  const guessedDistance = Math.hypot(guessPx.x - anchorPx.x, guessPx.y - anchorPx.y)
+// t: 0 (easiest) -> 1 (hardest). Range narrows as difficulty rises.
+function hintRangeFor(rng: Rng, actualPx: number, t: number): { lo: number; hi: number } {
+  const widthFrac = 0.6 - 0.35 * t // 60% of actual at t=0, down to 25% at t=1
+  const width = Math.max(24, actualPx * widthFrac)
+  // Place the actual value at a random fraction (not always the middle) of the range.
+  const fraction = 0.15 + rng() * 0.7 // actual sits somewhere in the middle 70% of the range, but rarely dead center
+  const lo = Math.max(0, Math.round(actualPx - width * fraction))
+  const hi = Math.round(lo + width)
+  return { lo, hi }
+}
+
+function scoreFor(actualDistance: number, guessedDistance: number, diagonal: number) {
   const diff = Math.abs(guessedDistance - actualDistance)
-  const score = Math.max(0, 100 * (1 - diff / diagonal))
-  return { actualDistance, guessedDistance, score }
+  return Math.max(0, 100 * (1 - diff / diagonal))
 }
 
 export function GuessDistanceGame() {
@@ -154,6 +166,13 @@ function GuessDistanceRun({
   const [rounds, setRounds] = useState<Round[]>([])
   const [lives, setLives] = useState(ENDLESS_LIVES)
   const [runs, setRuns] = useState(() => getRuns(GAME_ID, config.mode))
+  const [guessDraft, setGuessDraft] = useState(50)
+
+  // The board div (rendered continuously through showing/guessing/roundResult)
+  // so we can read its real pixel size once it exists — the click-to-guess
+  // interaction is gone, so this is now the only way to convert the anchor
+  // and target's percentage coordinates into real pixel distances.
+  const boardRef = useRef<HTMLDivElement>(null)
 
   const currentIndex = rounds.length - 1
   const current = rounds[currentIndex]
@@ -163,6 +182,27 @@ function GuessDistanceRun({
     const timer = setTimeout(() => setPhase('guessing'), current.flashMs)
     return () => clearTimeout(timer)
   }, [phase, currentIndex, current])
+
+  // Once the board has mounted for this round, compute the real pixel
+  // distance between the anchor/target and this round's hint range. Guarded
+  // on actualDistance being null so this (and the rng() draw inside
+  // hintRangeFor) only ever runs once per round.
+  useEffect(() => {
+    if (!current || current.actualDistance !== null) return
+    const rect = boardRef.current?.getBoundingClientRect()
+    if (!rect || rect.width === 0 || rect.height === 0) return
+    const anchorPx = toPx(current.anchor, rect.width, rect.height)
+    const targetPx = toPx(current.target, rect.width, rect.height)
+    const actualDistance = Math.hypot(targetPx.x - anchorPx.x, targetPx.y - anchorPx.y)
+    const diagonal = Math.hypot(rect.width, rect.height)
+    const { lo, hi } = hintRangeFor(rng, actualDistance, current.t)
+    setRounds((rs) =>
+      rs.map((r, i) =>
+        i === currentIndex ? { ...r, actualDistance, diagonal, hintLo: lo, hintHi: hi } : r,
+      ),
+    )
+    setGuessDraft(Math.round((lo + hi) / 2))
+  }, [phase, currentIndex, current, rng])
 
   function makeRound(roundNum: number): Round {
     const t = difficultyForRound(roundNum, config.mode)
@@ -175,23 +215,12 @@ function GuessDistanceRun({
     setPhase('showing')
   }
 
-  function handleStageClick(e: React.MouseEvent<HTMLDivElement>) {
-    if (phase !== 'guessing' || !current) return
-    const rect = e.currentTarget.getBoundingClientRect()
-    const guess: Point = {
-      x: ((e.clientX - rect.left) / rect.width) * 100,
-      y: ((e.clientY - rect.top) / rect.height) * 100,
-    }
-    const { actualDistance, guessedDistance, score } = scoreFor(
-      current,
-      guess,
-      rect.width,
-      rect.height,
-    )
+  function submitGuess() {
+    if (!current || phase !== 'guessing' || current.actualDistance === null) return
+    const guessedDistance = Math.max(0, Math.round(guessDraft))
+    const score = scoreFor(current.actualDistance, guessedDistance, current.diagonal)
     setRounds((rs) =>
-      rs.map((r, i) =>
-        i === currentIndex ? { ...r, guess, actualDistance, guessedDistance, score } : r,
-      ),
+      rs.map((r, i) => (i === currentIndex ? { ...r, guessedDistance, score } : r)),
     )
     if (isEndless && isMiss(score)) setLives((l) => l - 1)
     setPhase('roundResult')
@@ -243,8 +272,8 @@ function GuessDistanceRun({
             {modeLabel(config)}
           </div>
           <p style={{ color: 'var(--text-dim)', maxWidth: 440, margin: '0 auto 28px' }}>
-            Two dots flash briefly. One reappears as an anchor — click where
-            the other one was, relative to it.{' '}
+            Two dots flash briefly. One reappears as an anchor. Guess the real
+            pixel distance to where the other one was.{' '}
             {isEndless
               ? `${ENDLESS_LIVES} lives — it gets harder the longer you survive.`
               : `${FIXED_ROUNDS} rounds, scored by how close your guessed distance is to the real one.`}
@@ -271,11 +300,11 @@ function GuessDistanceRun({
               }}
             >
               {phase === 'showing' && 'Memorize the gap…'}
-              {phase === 'guessing' && 'Click where the second dot was'}
+              {phase === 'guessing' && 'How far apart were they?'}
               {phase === 'roundResult' && ' '}
             </p>
             <div
-              onClick={handleStageClick}
+              ref={boardRef}
               style={{
                 position: 'relative',
                 width: '100%',
@@ -284,7 +313,6 @@ function GuessDistanceRun({
                 borderRadius: 'var(--radius-lg)',
                 background: 'var(--bg-card)',
                 overflow: 'hidden',
-                cursor: phase === 'guessing' ? 'crosshair' : 'default',
                 touchAction: 'manipulation',
               }}
             >
@@ -299,7 +327,7 @@ function GuessDistanceRun({
                 <Dot xPct={current.anchor.x} yPct={current.anchor.y} color="var(--accent)" />
               )}
 
-              {phase === 'roundResult' && current.guess && (
+              {phase === 'roundResult' && (
                 <>
                   <svg
                     viewBox="0 0 100 100"
@@ -316,29 +344,26 @@ function GuessDistanceRun({
                       strokeDasharray="2,2"
                       vectorEffect="non-scaling-stroke"
                     />
-                    <line
-                      x1={current.anchor.x}
-                      y1={current.anchor.y}
-                      x2={current.guess.x}
-                      y2={current.guess.y}
-                      stroke={current.score >= 70 ? 'var(--success)' : 'var(--danger)'}
-                      strokeWidth={0.4}
-                      strokeDasharray="2,2"
-                      vectorEffect="non-scaling-stroke"
-                    />
                   </svg>
                   <Dot xPct={current.anchor.x} yPct={current.anchor.y} color="var(--accent)" />
                   <Dot xPct={current.target.x} yPct={current.target.y} color="var(--accent)" />
-                  <Dot
-                    xPct={current.guess.x}
-                    yPct={current.guess.y}
-                    color={current.score >= 70 ? 'var(--success)' : 'var(--danger)'}
-                  />
                 </>
               )}
             </div>
 
-            {phase === 'roundResult' && (
+            {phase === 'guessing' && (
+              <div style={{ textAlign: 'center', marginTop: 24 }}>
+                <p style={{ fontSize: 13, color: 'var(--text-faint)', marginBottom: 12 }}>
+                  It's somewhere between {current.hintLo}px and {current.hintHi}px
+                </p>
+                <Stepper value={guessDraft} onChange={setGuessDraft} />
+                <div style={{ marginTop: 20 }}>
+                  <PlayButton onClick={submitGuess} label="Lock in guess" />
+                </div>
+              </div>
+            )}
+
+            {phase === 'roundResult' && current.actualDistance !== null && current.guessedDistance !== null && (
               <div style={{ textAlign: 'center', marginTop: 20 }}>
                 <div
                   style={{
@@ -387,7 +412,9 @@ function GuessDistanceRun({
                   }}
                 >
                   <span>Round {i + 1}</span>
-                  <span>{Math.abs(r.guessedDistance - r.actualDistance).toFixed(0)}px off</span>
+                  <span>
+                    {Math.abs((r.guessedDistance ?? 0) - (r.actualDistance ?? 0)).toFixed(0)}px off
+                  </span>
                   <span style={{ fontWeight: 600, color: 'var(--text)' }}>
                     {r.score.toFixed(1)}
                   </span>
@@ -522,6 +549,67 @@ function PlayButton({ onClick, label }: { onClick: () => void; label: string }) 
         padding: '14px 32px',
         fontSize: 16,
         fontWeight: 600,
+        cursor: 'pointer',
+      }}
+    >
+      {label}
+    </button>
+  )
+}
+
+// Same +/- stepper pattern as CountGame's Stepper/StepButton, adapted here
+// (not imported — this codebase keeps each game's UI self-contained) with a
+// bigger step since distances run tens-to-hundreds of px rather than a dot
+// count.
+function Stepper({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 12,
+      }}
+    >
+      <StepButton label="−" onClick={() => onChange(Math.max(0, value - 5))} />
+      <input
+        type="number"
+        inputMode="numeric"
+        value={value}
+        onChange={(e) => {
+          const n = parseInt(e.target.value, 10)
+          onChange(Number.isNaN(n) ? 0 : Math.max(0, n))
+        }}
+        style={{
+          width: 90,
+          textAlign: 'center',
+          fontSize: 28,
+          fontWeight: 700,
+          padding: '10px 8px',
+          borderRadius: 'var(--radius-sm)',
+          border: '1px solid var(--border)',
+          background: 'var(--bg-card)',
+          color: 'var(--text)',
+        }}
+      />
+      <StepButton label="+" onClick={() => onChange(value + 5)} />
+    </div>
+  )
+}
+
+function StepButton({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        width: 44,
+        height: 44,
+        borderRadius: '50%',
+        border: '1px solid var(--border)',
+        background: 'var(--bg-card)',
+        color: 'var(--text)',
+        fontSize: 20,
+        fontWeight: 700,
         cursor: 'pointer',
       }}
     >
