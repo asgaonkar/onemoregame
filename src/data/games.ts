@@ -72,6 +72,13 @@ export const games: GameMeta[] = [
     category: 'Perception',
     status: 'live',
   },
+  {
+    id: 'risk',
+    name: 'Risk',
+    tagline: 'Cash out, or push your luck for more.',
+    category: 'Strategy',
+    status: 'live',
+  },
 ]
 
 export const categoryOrder: GameCategory[] = [
