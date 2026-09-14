@@ -93,6 +93,13 @@ export const games: GameMeta[] = [
     category: 'Memory',
     status: 'live',
   },
+  {
+    id: 'aim',
+    name: 'Aim',
+    tagline: 'Click as many targets as you can before time runs out.',
+    category: 'Precision',
+    status: 'live',
+  },
 ]
 
 export const categoryOrder: GameCategory[] = [
