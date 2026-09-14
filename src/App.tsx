@@ -13,6 +13,7 @@ import { MirrorGame } from './pages/games/MirrorGame'
 import { ReflexGame } from './pages/games/ReflexGame'
 import { SequenceGame } from './pages/games/SequenceGame'
 import { AimGame } from './pages/games/AimGame'
+import { RiskGame } from './pages/games/RiskGame'
 import { NotFound } from './pages/NotFound'
 
 export function App() {
@@ -33,6 +34,7 @@ export function App() {
           <Route path="/reflex" element={<ReflexGame />} />
           <Route path="/sequence" element={<SequenceGame />} />
           <Route path="/aim" element={<AimGame />} />
+          <Route path="/risk" element={<RiskGame />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </HashRouter>
