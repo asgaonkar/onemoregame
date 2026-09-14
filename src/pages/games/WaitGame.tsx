@@ -213,8 +213,11 @@ function WaitRun({
 
             <div style={{ textAlign: 'center' }}>
               <div style={{ fontSize: 13, color: 'var(--text-faint)' }}>TARGET</div>
-              <div style={{ fontSize: 28, fontWeight: 700, margin: '4px 0 24px' }}>
+              <div style={{ fontSize: 28, fontWeight: 700, margin: '4px 0 2px' }}>
                 {formatSeconds(current.targetMs)}
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--text-faint)', margin: '0 0 24px' }}>
+                ±{current.toleranceMs}ms tolerance
               </div>
             </div>
 
