@@ -19,6 +19,8 @@ import type { Rng } from '../../lib/rng'
 const GAME_ID = 'swap'
 const SLOT_COUNT = 5
 const SETTLE_MS = 500
+const CORRECT_SCORE_MIN = 60
+const CORRECT_SCORE_MAX = 100
 
 // Slots are fixed percentage coordinates arranged in a gentle arc, so the
 // board never needs to be measured before render — only the swap/guess
@@ -47,6 +49,7 @@ type Round = {
   score: number
   revealMs: number
   swapStepMs: number
+  t: number
 }
 
 function randomSwapPair(rng: Rng, prev: [number, number] | null): [number, number] {
@@ -109,6 +112,7 @@ function makeRound(rng: Rng, roundNum: number, mode: RunConfig['mode']): Round {
     score: 0,
     revealMs,
     swapStepMs,
+    t,
   }
 }
 
@@ -230,7 +234,10 @@ function SwapRun({
 
   function handleSlotClick(slotIndex: number) {
     if (phase !== 'guessing' || !current || current.guessSlot !== null) return
-    const score = slotIndex === current.correctSlot ? 100 : 0
+    const score =
+      slotIndex === current.correctSlot
+        ? Math.round(CORRECT_SCORE_MIN + (CORRECT_SCORE_MAX - CORRECT_SCORE_MIN) * current.t)
+        : 0
     setRounds((rs) =>
       rs.map((r, i) => (i === currentIndex ? { ...r, guessSlot: slotIndex, score } : r)),
     )
@@ -331,7 +338,7 @@ function SwapRun({
               let ringColor = 'var(--border)'
               if (phase === 'roundResult') {
                 if (slotIndex === current.guessSlot) {
-                  ringColor = current.score === 100 ? 'var(--success)' : 'var(--danger)'
+                  ringColor = current.score > 0 ? 'var(--success)' : 'var(--danger)'
                 } else if (slotIndex === current.correctSlot) {
                   ringColor = 'var(--accent)'
                 }
@@ -394,7 +401,7 @@ function SwapRun({
           {phase === 'roundResult' && (
             <div style={{ textAlign: 'center', marginTop: 20 }}>
               <div style={{ fontSize: 15, color: 'var(--text-dim)' }}>
-                {current.score === 100 ? 'Correct' : `It was slot ${current.correctSlot + 1}`}
+                {current.score > 0 ? 'Correct' : `It was slot ${current.correctSlot + 1}`}
               </div>
               <div style={{ fontSize: 32, fontWeight: 700, margin: '4px 0 20px' }}>
                 {current.score.toFixed(0)}
@@ -427,7 +434,7 @@ function SwapRun({
                   }}
                 >
                   <span>Round {i + 1}</span>
-                  <span>{r.score === 100 ? 'Correct' : 'Missed'}</span>
+                  <span>{r.score > 0 ? 'Correct' : 'Missed'}</span>
                   <span style={{ fontWeight: 600, color: 'var(--text)' }}>
                     {r.score.toFixed(0)}
                   </span>
