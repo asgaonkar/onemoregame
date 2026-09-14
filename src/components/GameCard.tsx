@@ -4,15 +4,15 @@ import type { BestOn, GameComplexity, GameMeta } from '../data/games'
 import { usePointerKind } from '../lib/device'
 
 const COMPLEXITY_LABEL: Record<GameComplexity, string> = {
+  easy: 'EASY',
+  medium: 'MEDIUM',
+  hard: 'HARD',
+}
+
+const COMPLEXITY_TITLE: Record<GameComplexity, string> = {
   easy: 'Easy to pick up',
   medium: 'Some rules to learn',
   hard: 'Takes a moment to grok',
-}
-
-const COMPLEXITY_LEVEL: Record<GameComplexity, number> = {
-  easy: 1,
-  medium: 2,
-  hard: 3,
 }
 
 export function GameCard({ game }: { game: GameMeta }) {
@@ -111,13 +111,13 @@ function DeviceBadge({ bestOn }: { bestOn: BestOn }) {
       }}
     >
       {bestOn === 'touch' ? (
-        <TouchIcon />
+        <PhoneIcon />
       ) : bestOn === 'mouse' ? (
         <MouseIcon />
       ) : (
         <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
           <MouseIcon />
-          <TouchIcon />
+          <PhoneIcon />
         </span>
       )}
     </span>
@@ -125,30 +125,24 @@ function DeviceBadge({ bestOn }: { bestOn: BestOn }) {
 }
 
 function ComplexityBadge({ complexity }: { complexity: GameComplexity }) {
-  const level = COMPLEXITY_LEVEL[complexity]
   return (
     <span
-      title={COMPLEXITY_LABEL[complexity]}
+      title={COMPLEXITY_TITLE[complexity]}
       style={{
         display: 'flex',
-        alignItems: 'flex-end',
-        gap: 2,
-        width: 20,
+        alignItems: 'center',
         height: 20,
-        justifyContent: 'center',
+        padding: '0 6px',
+        borderRadius: 999,
+        border: '1px solid var(--border)',
+        fontSize: 9,
+        fontWeight: 700,
+        letterSpacing: 0.4,
+        color: 'var(--text-faint)',
+        whiteSpace: 'nowrap',
       }}
     >
-      {[1, 2, 3].map((i) => (
-        <span
-          key={i}
-          style={{
-            width: 3,
-            height: 4 + i * 3,
-            borderRadius: 1,
-            background: i <= level ? 'var(--text-dim)' : 'var(--border)',
-          }}
-        />
-      ))}
+      {COMPLEXITY_LABEL[complexity]}
     </span>
   )
 }
@@ -162,31 +156,12 @@ function MouseIcon() {
   )
 }
 
-// A fingertip tapping down with a couple of ripple arcs — deliberately not a
-// radiating-lines glyph, since that would read as the theme toggle's sun icon.
-function TouchIcon() {
+function PhoneIcon() {
   return (
-    <svg width="14" height="14" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-      <path
-        d="M7 12.5V5.2a1.4 1.4 0 0 1 2.8 0v4.6"
-        stroke="currentColor"
-        strokeWidth="1.4"
-        strokeLinecap="round"
-      />
-      <path
-        d="M12.5 6.5a6.5 6.5 0 0 1 0 8"
-        stroke="currentColor"
-        strokeWidth="1.4"
-        strokeLinecap="round"
-      />
-      <path
-        d="M15 4a10 10 0 0 1 0 13"
-        stroke="currentColor"
-        strokeWidth="1.4"
-        strokeLinecap="round"
-        opacity={0.55}
-      />
-      <circle cx="7" cy="13.3" r="1.3" fill="currentColor" />
+    <svg width="10" height="14" viewBox="0 0 16 20" fill="none" aria-hidden="true">
+      <rect x="1" y="1" width="14" height="18" rx="2.5" stroke="currentColor" strokeWidth="1.4" />
+      <line x1="1" y1="15.5" x2="15" y2="15.5" stroke="currentColor" strokeWidth="1.4" />
+      <circle cx="8" cy="17.3" r="0.9" fill="currentColor" />
     </svg>
   )
 }

@@ -44,7 +44,7 @@ export const games: GameMeta[] = [
     tagline: 'Objects swap places fast. Find where one ended up.',
     category: 'Memory',
     status: 'live',
-    complexity: 'medium',
+    complexity: 'easy',
     bestOn: 'both',
   },
   {
@@ -53,7 +53,7 @@ export const games: GameMeta[] = [
     tagline: 'Two points flash briefly. Recall the gap between them.',
     category: 'Memory',
     status: 'live',
-    complexity: 'medium',
+    complexity: 'hard',
     bestOn: 'both',
   },
   {
@@ -71,7 +71,7 @@ export const games: GameMeta[] = [
     tagline: 'Stop the timer on an exact target.',
     category: 'Timing',
     status: 'live',
-    complexity: 'easy',
+    complexity: 'medium',
     bestOn: 'both',
   },
   {
@@ -80,7 +80,7 @@ export const games: GameMeta[] = [
     tagline: 'Track one dot through a moving crowd.',
     category: 'Perception',
     status: 'live',
-    complexity: 'medium',
+    complexity: 'easy',
     bestOn: 'mouse',
   },
   {
@@ -98,7 +98,7 @@ export const games: GameMeta[] = [
     tagline: 'A crowd of objects flashes by. How many?',
     category: 'Perception',
     status: 'live',
-    complexity: 'easy',
+    complexity: 'medium',
     bestOn: 'both',
   },
   {
