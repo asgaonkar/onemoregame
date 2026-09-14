@@ -11,6 +11,7 @@ import { CrowdGame } from './pages/games/CrowdGame'
 import { TraceGame } from './pages/games/TraceGame'
 import { MirrorGame } from './pages/games/MirrorGame'
 import { ReflexGame } from './pages/games/ReflexGame'
+import { SequenceGame } from './pages/games/SequenceGame'
 import { NotFound } from './pages/NotFound'
 
 export function App() {
@@ -29,6 +30,7 @@ export function App() {
           <Route path="/trace" element={<TraceGame />} />
           <Route path="/mirror" element={<MirrorGame />} />
           <Route path="/reflex" element={<ReflexGame />} />
+          <Route path="/sequence" element={<SequenceGame />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </HashRouter>

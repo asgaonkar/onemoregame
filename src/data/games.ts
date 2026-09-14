@@ -86,6 +86,13 @@ export const games: GameMeta[] = [
     category: 'Timing',
     status: 'live',
   },
+  {
+    id: 'sequence',
+    name: 'Sequence',
+    tagline: 'Watch the sequence, then repeat it back.',
+    category: 'Memory',
+    status: 'live',
+  },
 ]
 
 export const categoryOrder: GameCategory[] = [
