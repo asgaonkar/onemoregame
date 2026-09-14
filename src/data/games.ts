@@ -72,6 +72,13 @@ export const games: GameMeta[] = [
     category: 'Perception',
     status: 'live',
   },
+  {
+    id: 'mirror',
+    name: 'Mirror',
+    tagline: 'Memorize the pattern, then recreate its mirror image.',
+    category: 'Memory',
+    status: 'live',
+  },
 ]
 
 export const categoryOrder: GameCategory[] = [
