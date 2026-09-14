@@ -72,6 +72,13 @@ export const games: GameMeta[] = [
     category: 'Perception',
     status: 'live',
   },
+  {
+    id: 'flash',
+    name: 'Flash',
+    tagline: 'A scene flashes by. Answer fast before it fades.',
+    category: 'Perception',
+    status: 'live',
+  },
 ]
 
 export const categoryOrder: GameCategory[] = [
