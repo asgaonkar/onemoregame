@@ -81,7 +81,7 @@ export const games: GameMeta[] = [
     category: 'Perception',
     status: 'live',
     complexity: 'easy',
-    bestOn: 'mouse',
+    bestOn: 'both',
   },
   {
     id: 'blink',
@@ -89,7 +89,7 @@ export const games: GameMeta[] = [
     tagline: 'Spot what changed between two flashes.',
     category: 'Perception',
     status: 'live',
-    complexity: 'easy',
+    complexity: 'medium',
     bestOn: 'both',
   },
   {
@@ -117,7 +117,7 @@ export const games: GameMeta[] = [
     category: 'Timing',
     status: 'live',
     complexity: 'easy',
-    bestOn: 'mouse',
+    bestOn: 'touch',
   },
   {
     id: 'sequence',
@@ -135,7 +135,7 @@ export const games: GameMeta[] = [
     category: 'Precision',
     status: 'live',
     complexity: 'easy',
-    bestOn: 'mouse',
+    bestOn: 'touch',
   },
   {
     id: 'risk',
