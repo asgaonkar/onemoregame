@@ -10,7 +10,6 @@ import {
   difficultyForRound,
   ENDLESS_LIVES,
   FIXED_ROUNDS,
-  isMiss,
   markDailyPlayed,
   rngFor,
   type RunConfig,
@@ -31,7 +30,6 @@ const MOVE_SPEED_MAX = 18 // %/s at t = 1
 // needs a different percentage-of-height size than its percentage-of-width
 // size (matching the same compensation CrowdGame uses for dot velocity).
 const ASPECT_Y = 4 / 3
-const EXPECTED_HITS_PER_SEC = 1.4 // calibrated "good" pace for scoring
 
 function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t
@@ -58,12 +56,11 @@ type Session = {
   score: number
 }
 
-function scoreForSession(hits: number, misses: number, durationMs: number): number {
-  const seconds = durationMs / 1000
-  const expectedHits = seconds * EXPECTED_HITS_PER_SEC
-  const accuracy = hits + misses > 0 ? hits / (hits + misses) : 0
-  const rawScore = 100 * (hits / expectedHits) * accuracy
-  return Math.max(0, Math.min(100, rawScore))
+// Net score: every hit is worth 1 point, every miss costs half a point —
+// spamming clicks to rack up hits isn't free, but a session can't finish
+// below 0 ("highest wins", and a negative number would be confusing).
+function scoreForSession(hits: number, misses: number): number {
+  return Math.max(0, hits - misses / 2)
 }
 
 function spawnTarget(rng: Rng, t: number, sizePct: number): Target {
@@ -202,16 +199,19 @@ function AimRun({
 
   useEffect(() => clearTimers, [])
 
-  function finishSession(durationMs: number) {
+  function finishSession() {
     const finalHits = hitsRef.current
     const finalMisses = missesRef.current
-    const score = scoreForSession(finalHits, finalMisses, durationMs)
+    const score = scoreForSession(finalHits, finalMisses)
     setSessions((s) =>
       s.map((sess, i) =>
         i === s.length - 1 ? { ...sess, hits: finalHits, misses: finalMisses, score } : sess,
       ),
     )
-    if (isEndless && isMiss(score)) setLives((l) => l - 1)
+    // No net positive hits after accounting for misses costs a life — the
+    // standard isMiss(score<40) rule doesn't apply here since this score is
+    // an open-ended hit count, not a 0-100 scale.
+    if (isEndless && score <= 0) setLives((l) => l - 1)
     setPhase('roundResult')
   }
 
@@ -252,7 +252,7 @@ function AimRun({
         rafRef.current = requestAnimationFrame(frame)
       } else {
         rafRef.current = null
-        finishSession(durationMs)
+        finishSession()
       }
     }
 
@@ -419,11 +419,12 @@ function AimRun({
           {phase === 'roundResult' && (
             <div style={{ textAlign: 'center', marginTop: 20 }}>
               <div style={{ fontSize: 15, color: 'var(--text-dim)' }}>
-                {current.hits} hits · {(resultAccuracy * 100).toFixed(0)}% accuracy
+                {current.hits} hits · {current.misses} misses ·{' '}
+                {(resultAccuracy * 100).toFixed(0)}% accuracy
               </div>
               <div style={{ fontSize: 32, fontWeight: 700, margin: '4px 0 20px' }}>
                 {current.score.toFixed(1)}
-                <span style={{ fontSize: 16, color: 'var(--text-faint)' }}>/100</span>
+                <span style={{ fontSize: 16, color: 'var(--text-faint)' }}> points</span>
               </div>
               <PlayButton
                 onClick={nextRound}
@@ -462,7 +463,7 @@ function AimRun({
           )}
           <div style={{ textAlign: 'center' }}>
             <div style={{ fontSize: 13, color: 'var(--text-faint)' }}>
-              {isEndless ? 'ROUNDS SURVIVED' : 'AVERAGE SCORE'}
+              {isEndless ? 'ROUNDS SURVIVED' : 'AVERAGE POINTS'}
             </div>
             <div style={{ fontSize: 44, fontWeight: 700, margin: '4px 0 24px' }}>
               {isEndless
@@ -483,7 +484,7 @@ function AimRun({
           {config.mode !== 'practice' && (
             <LocalLeaderboard
               runs={runs}
-              formatScore={isEndless ? (s) => `${s.toFixed(0)} rounds` : undefined}
+              formatScore={isEndless ? (s) => `${s.toFixed(0)} rounds` : (s) => `${s.toFixed(1)} points`}
             />
           )}
         </div>
