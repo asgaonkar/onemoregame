@@ -22,6 +22,12 @@ const GAME_ID = 'sequence'
 // colors) — UI chrome still uses CSS vars everywhere else.
 const PALETTE = ['#ef4444', '#f59e0b', '#22c55e', '#3b82f6', '#a855f7', '#ec4899']
 
+// A perfect round's ceiling scales with difficulty, same as Swap/Crowd/Blink
+// — a longer, faster sequence pays more for a flawless repeat than a short,
+// slow one, on top of the partial credit for how far you got.
+const SCORE_CEILING_MIN = 60
+const SCORE_CEILING_MAX = 100
+
 type Round = {
   t: number
   tileCount: number
@@ -147,7 +153,8 @@ function SequenceRun({
   function completeRound(correctCount: number) {
     if (!current || processedRef.current === currentIndex) return
     processedRef.current = currentIndex
-    const score = Math.round(100 * (correctCount / current.sequence.length))
+    const ceiling = SCORE_CEILING_MIN + (SCORE_CEILING_MAX - SCORE_CEILING_MIN) * current.t
+    const score = Math.round(ceiling * (correctCount / current.sequence.length))
     setRounds((rs) =>
       rs.map((r, i) => (i === currentIndex ? { ...r, correctCount, score } : r)),
     )
