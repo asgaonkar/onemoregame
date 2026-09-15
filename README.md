@@ -2,10 +2,6 @@
 
 Build a minimalist website containing a collection of short, addictive visual and accuracy games.
 
-The inspiration is **Flashed.world**, especially its simple loop of showing something briefly, asking the player to recreate/remember it, and scoring based on accuracy:
-
-[Flashed.world](https://flashed.world/?utm_source=chatgpt.com)
-
 ## Initial Games
 
 ### 1. Trace
