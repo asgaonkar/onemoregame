@@ -35,11 +35,13 @@ type Shape = {
 type ModType = 'move' | 'color' | 'size'
 
 type Round = {
+  t: number
   shapes: Shape[]
   modifiedShapes: Shape[]
   changedIndex: number
   modType: ModType
   previewMs: number
+  gapMs: number
   guess: { xPct: number; yPct: number } | null
   distance: number
   hit: boolean
@@ -181,6 +183,21 @@ function recolorShape(rng: Rng, shapes: Shape[], idx: number, t: number): Shape[
   return modified
 }
 
+// A correct catch's score scales with difficulty, same as Swap/Crowd —
+// harder (slower-blinking) rounds pay more for a correct guess.
+const CORRECT_SCORE_MIN = 60
+const CORRECT_SCORE_MAX = 100
+
+// t: 0 (easiest) -> 1 (hardest). The blank gap between the two blinks is the
+// main difficulty lever: a short gap makes the two views feel almost like
+// one continuous flicker, and the changed shape visually "pops" — genuinely
+// easy to catch. A long gap gives real change blindness time to set in,
+// making the same change much harder to spot. So rounds start fast (a quick,
+// obvious blink) and slow down as difficulty rises.
+function blinkGapMsFor(t: number): number {
+  return Math.round(lerp(350, 1700, t))
+}
+
 function generateRound(rng: Rng, roundNum: number, mode: GameMode): Round {
   const t = difficultyForRound(roundNum, mode)
   const count = clamp(6 + Math.floor(rng() * 5) + Math.round(t * 3), 6, 13)
@@ -196,13 +213,16 @@ function generateRound(rng: Rng, roundNum: number, mode: GameMode): Round {
         ? recolorShape(rng, shapes, changedIndex, t)
         : resizeShape(rng, shapes, changedIndex, t)
   const previewMs = Math.round(lerp(1700, 800, t))
+  const gapMs = blinkGapMsFor(t)
 
   return {
+    t,
     shapes,
     modifiedShapes,
     changedIndex,
     modType,
     previewMs,
+    gapMs,
     guess: null,
     distance: 0,
     hit: false,
@@ -215,10 +235,6 @@ const MOD_LABEL: Record<ModType, string> = {
   color: 'Changed color',
   size: 'Changed size',
 }
-
-// Pause between the first blink (original) and the second blink (modified),
-// giving the two flashes a real gap instead of a snappy sub-second flicker.
-const BLINK_GAP_MS = 1500
 
 export function BlinkGame() {
   const [config, setConfig] = useState<RunConfig | null>(null)
@@ -300,7 +316,7 @@ function BlinkRun({
       return () => clearTimeout(timer)
     }
     if (phase === 'blank') {
-      const timer = setTimeout(() => setPhase('preview2'), BLINK_GAP_MS)
+      const timer = setTimeout(() => setPhase('preview2'), current.gapMs)
       return () => clearTimeout(timer)
     }
     if (phase === 'preview2') {
@@ -336,7 +352,9 @@ function BlinkRun({
     const hitRadiusPct = target.size / 2 + 6
     const hit = distPct <= hitRadiusPct
     const distance = (distPct / 100) * rect.width
-    const score = hit ? 100 : 0
+    const score = hit
+      ? Math.round(CORRECT_SCORE_MIN + (CORRECT_SCORE_MAX - CORRECT_SCORE_MIN) * current.t)
+      : 0
 
     setRounds((rs) =>
       rs.map((r, i) =>
@@ -397,7 +415,7 @@ function BlinkRun({
             Study the shapes, then spot the one that changed.{' '}
             {isEndless
               ? `${ENDLESS_LIVES} lives — it gets harder the longer you survive.`
-              : `${FIXED_ROUNDS} rounds, 100 points for a clean catch.`}
+              : `${FIXED_ROUNDS} rounds — later, slower blinks are worth more for a clean catch.`}
           </p>
           <PlayButton onClick={startGame} label="Start" />
         </div>
