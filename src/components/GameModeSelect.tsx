@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { createRunConfig, getDailyStatus, type GameMode, type RunConfig } from '../lib/modes'
 import { trackEvent } from '../lib/analytics'
 
@@ -99,68 +99,101 @@ export function GameModeSelect({
   const modes = Object.keys(MODE_INFO) as GameMode[]
 
   return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        borderRadius: 'var(--radius-md)',
-        border: '1px solid var(--border)',
-        background: 'var(--bg-card)',
-        overflow: 'hidden',
-      }}
-    >
+    <div style={{ display: 'flex', flexDirection: 'column' }}>
       {modes.map((mode, i) => (
-        <button
+        <ModeRow
           key={mode}
           onClick={() => pick(mode)}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: 16,
-            textAlign: 'left',
-            padding: '16px 18px',
-            borderTop: i === 0 ? 'none' : '1px solid var(--border)',
-            borderLeft: 'none',
-            borderRight: 'none',
-            borderBottom: 'none',
-            background: 'transparent',
-            color: 'var(--text)',
-            cursor: 'pointer',
-            fontFamily: 'inherit',
-            width: '100%',
-          }}
-        >
-          <div>
-            <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>
-              {MODE_INFO[mode].label}
-              {mode === 'daily' && dailyStatus && (
-                <span
-                  style={{
-                    marginLeft: 8,
-                    fontSize: 11,
-                    fontWeight: 600,
-                    color: 'var(--success)',
-                    textTransform: 'uppercase',
-                    letterSpacing: 0.4,
-                  }}
-                >
-                  Played · {dailyStatus.score.toFixed(0)}
-                </span>
-              )}
-            </div>
-            <div style={{ fontSize: 13, color: 'var(--text-dim)', lineHeight: 1.4 }}>
-              {MODE_INFO[mode].description}
-            </div>
-          </div>
-          <span
-            aria-hidden="true"
-            style={{ fontSize: 18, color: 'var(--text-faint)', flexShrink: 0 }}
-          >
-            →
-          </span>
-        </button>
+          showDivider={i < modes.length - 1}
+          label={MODE_INFO[mode].label}
+          description={MODE_INFO[mode].description}
+          tag={
+            mode === 'daily' && dailyStatus ? (
+              <span
+                style={{
+                  marginLeft: 8,
+                  fontSize: 11,
+                  fontWeight: 600,
+                  color: 'var(--success)',
+                  textTransform: 'uppercase',
+                  letterSpacing: 0.4,
+                }}
+              >
+                Played · {dailyStatus.score.toFixed(0)}
+              </span>
+            ) : null
+          }
+        />
       ))}
     </div>
+  )
+}
+
+function ModeRow({
+  label,
+  description,
+  tag,
+  showDivider,
+  onClick,
+}: {
+  label: string
+  description: string
+  tag?: ReactNode
+  showDivider: boolean
+  onClick: () => void
+}) {
+  const [hovered, setHovered] = useState(false)
+
+  return (
+    <button
+      onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: 16,
+        textAlign: 'left',
+        padding: '18px 2px',
+        border: 'none',
+        borderBottom: showDivider ? '1px solid var(--border)' : 'none',
+        background: 'transparent',
+        color: 'var(--text)',
+        cursor: 'pointer',
+        fontFamily: 'inherit',
+        width: '100%',
+      }}
+    >
+      <div>
+        <div
+          style={{
+            fontSize: 16,
+            fontWeight: 600,
+            marginBottom: 4,
+            color: hovered ? 'var(--accent)' : 'var(--text)',
+            transition: 'color 0.15s ease',
+          }}
+        >
+          {label}
+          {tag}
+        </div>
+        <div style={{ fontSize: 13, color: 'var(--text-dim)', lineHeight: 1.4 }}>
+          {description}
+        </div>
+      </div>
+      <span
+        aria-hidden="true"
+        style={{
+          fontSize: 18,
+          color: hovered ? 'var(--accent)' : 'var(--text-faint)',
+          flexShrink: 0,
+          transform: hovered ? 'translateX(3px)' : 'translateX(0)',
+          transition: 'transform 0.15s ease, color 0.15s ease',
+        }}
+      >
+        →
+      </span>
+    </button>
   )
 }
