@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { GameShell } from '../../components/GameShell'
 import { GameModeSelect } from '../../components/GameModeSelect'
 import { VsSequencer } from '../../components/VsSequencer'
@@ -13,6 +13,7 @@ import {
   isMiss,
   markDailyPlayed,
   rngFor,
+  type GameMode,
   type RunConfig,
 } from '../../lib/modes'
 import type { Rng } from '../../lib/rng'
@@ -109,6 +110,63 @@ function pairCountFor(t: number): number {
   return Math.round(4 + 3 * t)
 }
 
+// Board size grows round-over-round on its own timeline, separate from
+// `difficultyForRound` (which practice deliberately holds flat so colors
+// stay easy) — otherwise practice would deal the same 4-pair board forever.
+function pairCountForRound(round: number, mode: GameMode): number {
+  if (mode === 'endless') return pairCountFor(Math.min(1, (round - 1) / 11))
+  return pairCountFor((round - 1) / (FIXED_ROUNDS - 1))
+}
+
+// Card edge length (px) for a given pair count — cards shrink a little as
+// the board grows so more of them keep fitting per row.
+function cardSizeForPairs(pairCount: number): number {
+  if (pairCount <= 4) return 80
+  if (pairCount <= 5) return 72
+  if (pairCount <= 6) return 66
+  return 60
+}
+
+const CARD_GAP = 12
+const GRID_PADDING = 16
+
+// Widest column count that (a) evenly divides the card count, so the grid
+// is always a full rectangle with no dangling half-row, and (b) fits in the
+// measured container. On a wide screen 8 cards would otherwise wrap at a
+// natural 7-per-row, stranding a single card alone on its own line.
+function bestColumnCount(cardCount: number, cardSize: number, availWidth: number): number {
+  let best = 1
+  for (let cols = 1; cols <= cardCount; cols++) {
+    if (cardCount % cols !== 0) continue
+    const width = cols * cardSize + (cols - 1) * CARD_GAP
+    if (width <= availWidth) best = cols
+  }
+  return best
+}
+
+// Measures the card grid's available width so `bestColumnCount` can pick a
+// column count that fits — a plain CSS grid can't make that fit-vs-divides
+// decision on its own. A callback ref (rather than useRef + an effect keyed
+// on mount) is required because the grid div doesn't exist yet when
+// MatchRun first mounts (still on the 'intro' phase) — it only appears
+// later, once the round starts.
+function useContainerWidth<T extends HTMLElement>() {
+  const [width, setWidth] = useState(0)
+  const observerRef = useRef<ResizeObserver | null>(null)
+
+  const ref = useCallback((el: T | null) => {
+    observerRef.current?.disconnect()
+    observerRef.current = null
+    if (!el) return
+    setWidth(el.clientWidth)
+    const observer = new ResizeObserver((entries) => setWidth(entries[0].contentRect.width))
+    observer.observe(el)
+    observerRef.current = observer
+  }, [])
+
+  return [ref, width] as const
+}
+
 // A flawless run (exactly `pairCount` moves) scores 100; a run taking 2.5x
 // `pairCount` moves scores 0; linear between, clamped.
 function scoreForMoves(moves: number, pairCount: number): number {
@@ -197,9 +255,15 @@ function MatchRun({
   // first tap — closes the gap before `resolving`/`setFlipped` commit.
   const flippingRef = useRef(false)
 
+  const [gridRef, gridOuterWidth] = useContainerWidth<HTMLDivElement>()
+  const cardSize = current ? cardSizeForPairs(current.pairCount) : 0
+  const gridColumns = current
+    ? bestColumnCount(current.cards.length, cardSize, gridOuterWidth - 2 * GRID_PADDING)
+    : 1
+
   function makeRound(roundNum: number): Round {
     const t = difficultyForRound(roundNum, config.mode)
-    const pairCount = pairCountFor(t)
+    const pairCount = pairCountForRound(roundNum, config.mode)
     return { t, pairCount, cards: buildCards(rng, pairCount, t), moves: 0, score: 0 }
   }
 
@@ -337,43 +401,68 @@ function MatchRun({
           ) : (
             <RoundProgress index={currentIndex} total={FIXED_ROUNDS} />
           )}
-          <div
-            style={{
-              textAlign: 'center',
-              fontSize: 13,
-              color: 'var(--text-dim)',
-              marginBottom: 10,
-            }}
-          >
-            Moves: {current.moves}
+          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 14 }}>
+            <div
+              style={{
+                display: 'inline-flex',
+                alignItems: 'baseline',
+                gap: 5,
+                padding: '6px 16px',
+                border: '1px solid var(--border)',
+                borderRadius: 999,
+                fontSize: 13,
+                color: 'var(--text-dim)',
+              }}
+            >
+              <span style={{ fontWeight: 700, color: 'var(--text)', fontSize: 15 }}>
+                {current.moves}
+              </span>
+              moves
+            </div>
           </div>
           <div
+            ref={gridRef}
             style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fill, minmax(64px, 1fr))',
-              gap: 10,
-              padding: 14,
+              padding: GRID_PADDING,
               border: '1px solid var(--border)',
               borderRadius: 'var(--radius-lg)',
               background: 'var(--bg-card)',
             }}
           >
-            {current.cards.map((card) => (
-              <MatchCard
-                key={card.id}
-                card={card}
-                faceUp={card.matched || flipped.includes(card.id)}
-                onClick={() => handleCardClick(card.id)}
-              />
-            ))}
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: `repeat(${gridColumns}, ${cardSize}px)`,
+                justifyContent: 'center',
+                gap: CARD_GAP,
+              }}
+            >
+              {current.cards.map((card) => (
+                <MatchCard
+                  key={card.id}
+                  card={card}
+                  size={cardSize}
+                  faceUp={card.matched || flipped.includes(card.id)}
+                  onClick={() => handleCardClick(card.id)}
+                />
+              ))}
+            </div>
           </div>
 
           {phase === 'roundResult' && (
             <div style={{ textAlign: 'center', marginTop: 20 }}>
-              <div style={{ fontSize: 15, color: 'var(--text-dim)' }}>
+              <div
+                style={{
+                  fontSize: 13,
+                  fontWeight: 600,
+                  letterSpacing: 0.4,
+                  textTransform: 'uppercase',
+                  color: current.score >= 70 ? 'var(--success)' : 'var(--text-faint)',
+                }}
+              >
                 {current.moves} moves · {current.pairCount} pairs
               </div>
-              <div style={{ fontSize: 32, fontWeight: 700, margin: '4px 0 20px' }}>
+              <div style={{ fontSize: 32, fontWeight: 700, margin: '6px 0 20px' }}>
                 {current.score}
                 <span style={{ fontSize: 16, color: 'var(--text-faint)' }}>/100</span>
               </div>
@@ -439,29 +528,112 @@ function MatchRun({
 
 function MatchCard({
   card,
+  size,
   faceUp,
   onClick,
 }: {
   card: CardData
+  size: number
   faceUp: boolean
   onClick: () => void
 }) {
+  const [hovered, setHovered] = useState(false)
+
   return (
     <button
       onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
       disabled={card.matched}
+      aria-label={card.matched ? 'matched card' : faceUp ? 'revealed card' : 'hidden card'}
       style={{
-        aspectRatio: '1 / 1',
-        border: `1px solid ${faceUp ? card.color : 'var(--border)'}`,
-        borderRadius: 'var(--radius-md)',
-        background: faceUp ? card.color : 'var(--bg)',
-        opacity: card.matched ? 0.5 : 1,
-        cursor: card.matched ? 'default' : 'pointer',
+        width: size,
+        height: size,
+        flex: '0 0 auto',
+        border: 'none',
+        background: 'none',
         padding: 0,
-        transition: 'background 0.15s ease, opacity 0.15s ease',
+        cursor: card.matched ? 'default' : 'pointer',
+        perspective: 600,
+        transform: card.matched
+          ? 'scale(0.92)'
+          : hovered && !faceUp
+            ? 'translateY(-2px)'
+            : 'none',
+        opacity: card.matched ? 0.55 : 1,
+        transition: 'transform 0.2s ease, opacity 0.3s ease 0.15s',
       }}
-      aria-label={faceUp ? 'revealed card' : 'hidden card'}
-    />
+    >
+      <div
+        style={{
+          position: 'relative',
+          width: '100%',
+          height: '100%',
+          transformStyle: 'preserve-3d',
+          transition: 'transform 0.45s cubic-bezier(0.2, 0.85, 0.3, 1.1)',
+          transform: faceUp ? 'rotateY(180deg)' : 'rotateY(0deg)',
+        }}
+      >
+        {/* face-down */}
+        <div
+          style={{
+            position: 'absolute',
+            inset: 0,
+            backfaceVisibility: 'hidden',
+            borderRadius: 'var(--radius-md)',
+            border: `1px solid ${hovered && !faceUp && !card.matched ? 'var(--accent)' : 'var(--border)'}`,
+            background: 'var(--bg-raised)',
+            backgroundImage: 'radial-gradient(var(--border) 1.4px, transparent 1.4px)',
+            backgroundSize: '12px 12px',
+            backgroundPosition: 'center',
+            transition: 'border-color 0.15s ease',
+          }}
+        />
+        {/* face-up */}
+        <div
+          style={{
+            position: 'absolute',
+            inset: 0,
+            backfaceVisibility: 'hidden',
+            transform: 'rotateY(180deg)',
+            borderRadius: 'var(--radius-md)',
+            border: `1px solid ${card.color}`,
+            background: card.color,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          {card.matched && <MatchCheckIcon />}
+        </div>
+      </div>
+    </button>
+  )
+}
+
+function MatchCheckIcon() {
+  return (
+    <div
+      style={{
+        width: '46%',
+        height: '46%',
+        borderRadius: '50%',
+        background: 'var(--bg-card)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
+      <svg width="60%" height="60%" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path
+          d="M4 12.5L9.5 18L20 6"
+          stroke="var(--success)"
+          strokeWidth="3.2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    </div>
   )
 }
 
@@ -515,9 +687,13 @@ function EndlessHud({ round, lives }: { round: number; lives: number }) {
 }
 
 function PlayButton({ onClick, label }: { onClick: () => void; label: string }) {
+  const [hovered, setHovered] = useState(false)
+
   return (
     <button
       onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
       style={{
         background: 'var(--accent)',
         color: 'var(--accent-text)',
@@ -527,6 +703,9 @@ function PlayButton({ onClick, label }: { onClick: () => void; label: string }) 
         fontSize: 16,
         fontWeight: 600,
         cursor: 'pointer',
+        transform: hovered ? 'translateY(-1px) scale(1.02)' : 'none',
+        boxShadow: hovered ? '0 8px 20px -6px var(--accent)' : 'none',
+        transition: 'transform 150ms ease, box-shadow 150ms ease',
       }}
     >
       {label}
