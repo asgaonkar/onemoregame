@@ -47,7 +47,7 @@ function getInitialBgStyle(): BackgroundStyle {
 
 function getInitialBgOpacity(): number {
   const stored = readJSON<number | null>('bgOpacity', null)
-  return typeof stored === 'number' && stored >= 0 && stored <= 1 ? stored : 1
+  return typeof stored === 'number' && stored >= 0 && stored <= 1 ? stored : 0.25
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
