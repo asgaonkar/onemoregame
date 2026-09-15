@@ -1,6 +1,7 @@
 import { games, categoryOrder } from '../data/games'
 import { GameCard } from '../components/GameCard'
 import { ThemeToggle } from '../components/ThemeToggle'
+import { SettingsButton } from '../components/SettingsButton'
 
 export function Home() {
   return (
@@ -22,7 +23,10 @@ export function Home() {
         <div style={{ fontWeight: 700, fontSize: 16, letterSpacing: 0.2 }}>
           onemoregame
         </div>
-        <ThemeToggle />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <SettingsButton />
+          <ThemeToggle />
+        </div>
       </header>
 
       <section style={{ marginBottom: 56 }}>

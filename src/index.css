@@ -12,6 +12,10 @@
   --accent-text: #0b0b10;
   --success: #4ade80;
   --danger: #f87171;
+  --grid-dot-subtle: rgba(255, 255, 255, 0.08);
+  --grid-dot-bold: rgba(255, 255, 255, 0.16);
+  --grid-line-subtle: rgba(255, 255, 255, 0.05);
+  --grid-line-bold: rgba(255, 255, 255, 0.11);
 
   --radius-lg: 20px;
   --radius-md: 14px;
@@ -32,6 +36,10 @@
   --accent-text: #ffffff;
   --success: #16a34a;
   --danger: #dc2626;
+  --grid-dot-subtle: rgba(0, 0, 0, 0.06);
+  --grid-dot-bold: rgba(0, 0, 0, 0.12);
+  --grid-line-subtle: rgba(0, 0, 0, 0.04);
+  --grid-line-bold: rgba(0, 0, 0, 0.08);
 }
 
 * {
@@ -45,12 +53,34 @@ body {
 }
 
 body {
-  background: var(--bg);
+  background-color: var(--bg);
   color: var(--text);
   font-family:
     -apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, Roboto, Helvetica,
     Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
+}
+
+body[data-bg-style='dots'] {
+  background-image: radial-gradient(var(--grid-dot-subtle) 1.4px, transparent 1.4px);
+  background-size: 24px 24px;
+}
+
+body[data-bg-style='dots'][data-bg-intensity='bold'] {
+  background-image: radial-gradient(var(--grid-dot-bold) 1.4px, transparent 1.4px);
+}
+
+body[data-bg-style='lines'] {
+  background-image:
+    linear-gradient(var(--grid-line-subtle) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line-subtle) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+
+body[data-bg-style='lines'][data-bg-intensity='bold'] {
+  background-image:
+    linear-gradient(var(--grid-line-bold) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line-bold) 1px, transparent 1px);
 }
 
 #root {

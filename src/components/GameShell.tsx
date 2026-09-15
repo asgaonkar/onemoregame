@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { ThemeToggle } from './ThemeToggle'
+import { SettingsButton } from './SettingsButton'
 
 export function GameShell({
   title,
@@ -47,7 +48,10 @@ export function GameShell({
         >
           ← Back
         </Link>
-        <ThemeToggle />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <SettingsButton />
+          <ThemeToggle />
+        </div>
       </div>
 
       <div style={{ textAlign: 'center', marginBottom: 24 }}>
