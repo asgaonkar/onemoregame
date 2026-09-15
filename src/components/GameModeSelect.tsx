@@ -96,49 +96,69 @@ export function GameModeSelect({
     )
   }
 
+  const modes = Object.keys(MODE_INFO) as GameMode[]
+
   return (
     <div
       style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
-        gap: 12,
+        display: 'flex',
+        flexDirection: 'column',
+        borderRadius: 'var(--radius-md)',
+        border: '1px solid var(--border)',
+        background: 'var(--bg-card)',
+        overflow: 'hidden',
       }}
     >
-      {(Object.keys(MODE_INFO) as GameMode[]).map((mode) => (
+      {modes.map((mode, i) => (
         <button
           key={mode}
           onClick={() => pick(mode)}
           style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 16,
             textAlign: 'left',
-            padding: 16,
-            borderRadius: 'var(--radius-md)',
-            border: '1px solid var(--border)',
-            background: 'var(--bg-card)',
+            padding: '16px 18px',
+            borderTop: i === 0 ? 'none' : '1px solid var(--border)',
+            borderLeft: 'none',
+            borderRight: 'none',
+            borderBottom: 'none',
+            background: 'transparent',
             color: 'var(--text)',
             cursor: 'pointer',
             fontFamily: 'inherit',
+            width: '100%',
           }}
         >
-          <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 6 }}>
-            {MODE_INFO[mode].label}
-            {mode === 'daily' && dailyStatus && (
-              <span
-                style={{
-                  marginLeft: 8,
-                  fontSize: 11,
-                  fontWeight: 600,
-                  color: 'var(--success)',
-                  textTransform: 'uppercase',
-                  letterSpacing: 0.4,
-                }}
-              >
-                Played · {dailyStatus.score.toFixed(0)}
-              </span>
-            )}
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>
+              {MODE_INFO[mode].label}
+              {mode === 'daily' && dailyStatus && (
+                <span
+                  style={{
+                    marginLeft: 8,
+                    fontSize: 11,
+                    fontWeight: 600,
+                    color: 'var(--success)',
+                    textTransform: 'uppercase',
+                    letterSpacing: 0.4,
+                  }}
+                >
+                  Played · {dailyStatus.score.toFixed(0)}
+                </span>
+              )}
+            </div>
+            <div style={{ fontSize: 13, color: 'var(--text-dim)', lineHeight: 1.4 }}>
+              {MODE_INFO[mode].description}
+            </div>
           </div>
-          <div style={{ fontSize: 13, color: 'var(--text-dim)', lineHeight: 1.4 }}>
-            {MODE_INFO[mode].description}
-          </div>
+          <span
+            aria-hidden="true"
+            style={{ fontSize: 18, color: 'var(--text-faint)', flexShrink: 0 }}
+          >
+            →
+          </span>
         </button>
       ))}
     </div>
