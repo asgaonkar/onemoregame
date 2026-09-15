@@ -4,6 +4,7 @@ import { GameModeSelect } from '../../components/GameModeSelect'
 import { VsSequencer } from '../../components/VsSequencer'
 import { LocalLeaderboard } from '../../components/LocalLeaderboard'
 import { addRun, getRuns } from '../../lib/leaderboard'
+import { trackEvent } from '../../lib/analytics'
 import {
   createRunConfig,
   difficultyForRound,
@@ -170,6 +171,7 @@ function SequenceRun({
   }
 
   function finish(finalScore: number) {
+    trackEvent('game_finish', { game: GAME_ID, mode: config.mode, score: finalScore })
     if (onFinish) {
       onFinish(finalScore)
       return

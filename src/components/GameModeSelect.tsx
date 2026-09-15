@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { createRunConfig, getDailyStatus, type GameMode, type RunConfig } from '../lib/modes'
+import { trackEvent } from '../lib/analytics'
 
 const MODE_INFO: Record<GameMode, { label: string; description: string }> = {
   daily: {
@@ -35,6 +36,7 @@ export function GameModeSelect({
       setPickingPlayers(true)
       return
     }
+    trackEvent('game_start', { game: gameId, mode })
     onStart(createRunConfig(mode, gameId))
   }
 
@@ -57,9 +59,10 @@ export function GameModeSelect({
           {[2, 3, 4].map((count) => (
             <button
               key={count}
-              onClick={() =>
+              onClick={() => {
+                trackEvent('game_start', { game: gameId, mode: 'vs', players: count })
                 onStart(createRunConfig('vs', gameId, { playerIndex: 0, playerCount: count }))
-              }
+              }}
               style={{
                 width: 56,
                 height: 56,

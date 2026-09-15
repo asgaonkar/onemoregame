@@ -1,5 +1,6 @@
 import { HashRouter, Routes, Route } from 'react-router-dom'
 import { ThemeProvider } from './lib/theme'
+import { AnalyticsTracker } from './components/AnalyticsTracker'
 import { Home } from './pages/Home'
 import { CenterGame } from './pages/games/CenterGame'
 import { WaitGame } from './pages/games/WaitGame'
@@ -21,6 +22,7 @@ export function App() {
   return (
     <ThemeProvider>
       <HashRouter>
+        <AnalyticsTracker />
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/center" element={<CenterGame />} />
