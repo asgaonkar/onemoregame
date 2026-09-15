@@ -250,7 +250,12 @@ function MirrorRun({
       return
     }
     if (config.mode === 'daily') markDailyPlayed(GAME_ID, finalScore)
-    if (config.mode !== 'practice') setRuns(addRun(GAME_ID, config.mode, finalScore))
+    if (config.mode !== 'practice') {
+      // Endless's final score is "rounds survived" (higher is better, like
+      // every other game's Endless). Fixed-round modes score by average
+      // pixel miss (lower is better) — flip the leaderboard sort for those.
+      setRuns(addRun(GAME_ID, config.mode, finalScore, { ascending: !isEndless }))
+    }
     setPhase('done')
   }
 
@@ -265,7 +270,7 @@ function MirrorRun({
       return
     }
     if (rounds.length >= FIXED_ROUNDS) {
-      finish(rounds.reduce((s, r) => s + r.score, 0) / rounds.length)
+      finish(rounds.reduce((s, r) => s + r.avgDistPx, 0) / rounds.length)
       return
     }
     setRounds((rs) => [...rs, makeRound(rs.length + 1)])
@@ -429,12 +434,9 @@ function MirrorRun({
 
           {phase === 'roundResult' && (
             <div style={{ textAlign: 'center', marginTop: 20 }}>
-              <div style={{ fontSize: 15, color: 'var(--text-dim)' }}>
-                {current.avgDistPx.toFixed(0)}px avg miss
-              </div>
-              <div style={{ fontSize: 32, fontWeight: 700, margin: '4px 0 20px' }}>
-                {current.score.toFixed(1)}
-                <span style={{ fontSize: 16, color: 'var(--text-faint)' }}>/100</span>
+              <div style={{ fontSize: 32, fontWeight: 700, margin: '20px 0' }}>
+                {current.avgDistPx.toFixed(0)}
+                <span style={{ fontSize: 16, color: 'var(--text-faint)' }}> px off</span>
               </div>
               <PlayButton
                 onClick={nextRound}
@@ -463,9 +465,8 @@ function MirrorRun({
                   }}
                 >
                   <span>Round {i + 1}</span>
-                  <span>{r.avgDistPx.toFixed(0)}px avg miss</span>
                   <span style={{ fontWeight: 600, color: 'var(--text)' }}>
-                    {r.score.toFixed(1)}
+                    {r.avgDistPx.toFixed(0)}px off
                   </span>
                 </div>
               ))}
@@ -473,12 +474,12 @@ function MirrorRun({
           )}
           <div style={{ textAlign: 'center' }}>
             <div style={{ fontSize: 13, color: 'var(--text-faint)' }}>
-              {isEndless ? 'ROUNDS SURVIVED' : 'AVERAGE SCORE'}
+              {isEndless ? 'ROUNDS SURVIVED' : 'AVERAGE PX OFF'}
             </div>
             <div style={{ fontSize: 44, fontWeight: 700, margin: '4px 0 24px' }}>
               {isEndless
                 ? rounds.length
-                : (rounds.reduce((s, r) => s + r.score, 0) / rounds.length).toFixed(1)}
+                : (rounds.reduce((s, r) => s + r.avgDistPx, 0) / rounds.length).toFixed(0)}
             </div>
             {onPlayAgain ? (
               <PlayButton onClick={onPlayAgain} label="Play again" />
@@ -494,7 +495,7 @@ function MirrorRun({
           {config.mode !== 'practice' && (
             <LocalLeaderboard
               runs={runs}
-              formatScore={isEndless ? (s) => `${s.toFixed(0)} rounds` : undefined}
+              formatScore={isEndless ? (s) => `${s.toFixed(0)} rounds` : (s) => `${s.toFixed(0)}px off`}
             />
           )}
         </div>
