@@ -217,6 +217,8 @@ const SHAPE_CARD_STYLE: React.CSSProperties = {
   color: 'var(--text)',
   cursor: 'pointer',
   fontFamily: 'inherit',
+  flex: '1 1 220px',
+  maxWidth: 320,
 }
 
 function ShapeTypePicker({ onPick }: { onPick: (shapeType: ShapeType) => void }) {
@@ -237,8 +239,9 @@ function ShapeTypePicker({ onPick }: { onPick: (shapeType: ShapeType) => void })
       </div>
       <div
         style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
+          display: 'flex',
+          flexWrap: 'wrap',
+          justifyContent: 'center',
           gap: 12,
         }}
       >
