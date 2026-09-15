@@ -247,10 +247,16 @@ function SequenceRun({
               fontSize: 13,
               fontWeight: 600,
               letterSpacing: 0.4,
-              color: 'var(--text-faint)',
+              color:
+                phase === 'roundResult'
+                  ? current.correctCount === current.sequence.length
+                    ? 'var(--success)'
+                    : 'var(--danger)'
+                  : 'var(--text-faint)',
               textTransform: 'uppercase',
               marginBottom: 16,
               height: 16,
+              transition: 'color 0.15s ease',
             }}
           >
             {phase === 'playback' && 'Watch closely'}
@@ -360,38 +366,80 @@ function TileGrid({
   disabled: boolean
   onTap: (index: number) => void
 }) {
+  const cols = tileCount <= 4 ? 2 : 3
+
   return (
     <div
       style={{
         display: 'flex',
-        gap: 12,
         justifyContent: 'center',
-        flexWrap: 'wrap',
-        padding: '8px 0',
+        padding: '20px 16px',
+        border: '1px solid var(--border)',
+        borderRadius: 'var(--radius-lg)',
+        background: 'var(--bg-card)',
       }}
     >
-      {Array.from({ length: tileCount }).map((_, i) => (
-        <button
-          key={i}
-          onClick={() => onTap(i)}
-          disabled={disabled}
-          aria-label={`Tile ${i + 1}`}
-          style={{
-            width: 64,
-            height: 64,
-            border: 'none',
-            borderRadius: 'var(--radius-md)',
-            background: PALETTE[i % PALETTE.length],
-            opacity: highlight === i ? 1 : 0.32,
-            transform: highlight === i ? 'scale(1.08)' : 'scale(1)',
-            transition: 'opacity 100ms ease, transform 100ms ease',
-            cursor: disabled ? 'default' : 'pointer',
-            padding: 0,
-            touchAction: 'manipulation',
-          }}
-        />
-      ))}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: `repeat(${cols}, minmax(58px, 84px))`,
+          gap: 14,
+        }}
+      >
+        {Array.from({ length: tileCount }).map((_, i) => (
+          <Tile
+            key={i}
+            color={PALETTE[i % PALETTE.length]}
+            lit={highlight === i}
+            disabled={disabled}
+            onTap={() => onTap(i)}
+            label={`Tile ${i + 1}`}
+          />
+        ))}
+      </div>
     </div>
+  )
+}
+
+function Tile({
+  color,
+  lit,
+  disabled,
+  onTap,
+  label,
+}: {
+  color: string
+  lit: boolean
+  disabled: boolean
+  onTap: () => void
+  label: string
+}) {
+  const [hovered, setHovered] = useState(false)
+
+  return (
+    <button
+      onClick={onTap}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      disabled={disabled}
+      aria-label={label}
+      style={{
+        width: '100%',
+        aspectRatio: '1 / 1',
+        border: 'none',
+        borderRadius: 'var(--radius-md)',
+        background: lit ? color : 'var(--bg-raised)',
+        boxShadow: lit
+          ? `0 0 0 2px ${color}, 0 10px 26px -6px ${color}b3`
+          : `inset 0 0 0 2px ${color}40`,
+        transform: lit ? 'scale(1.07)' : hovered && !disabled ? 'scale(1.03)' : 'scale(1)',
+        transition:
+          'transform 180ms cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 180ms ease, background 120ms ease',
+        cursor: disabled ? 'default' : 'pointer',
+        padding: 0,
+        touchAction: 'manipulation',
+      }}
+    />
   )
 }
 
@@ -413,6 +461,8 @@ function TapProgress({ done, total }: { done: number; total: number }) {
             height: 10,
             borderRadius: '50%',
             background: i < done ? 'var(--success)' : 'var(--border)',
+            transform: i < done ? 'scale(1.15)' : 'scale(1)',
+            transition: 'background 150ms ease, transform 150ms ease',
           }}
         />
       ))}
@@ -431,7 +481,7 @@ function SequenceReveal({
     <div
       style={{
         display: 'flex',
-        gap: 6,
+        gap: 7,
         justifyContent: 'center',
         flexWrap: 'wrap',
         margin: '4px 0 4px',
@@ -441,12 +491,14 @@ function SequenceReveal({
         <div
           key={i}
           style={{
-            width: 20,
-            height: 20,
-            borderRadius: 5,
-            background: PALETTE[tile % PALETTE.length],
-            opacity: i < correctCount ? 1 : 0.25,
+            width: 22,
+            height: 22,
+            borderRadius: 6,
+            background: i <= correctCount ? PALETTE[tile % PALETTE.length] : 'var(--bg-raised)',
+            border: i < correctCount ? 'none' : '1px solid var(--border)',
+            opacity: i < correctCount ? 1 : i === correctCount ? 0.9 : 0.45,
             boxShadow: i === correctCount ? '0 0 0 2px var(--danger)' : 'none',
+            transition: 'opacity 150ms ease, box-shadow 150ms ease',
           }}
         />
       ))}
@@ -504,9 +556,13 @@ function EndlessHud({ round, lives }: { round: number; lives: number }) {
 }
 
 function PlayButton({ onClick, label }: { onClick: () => void; label: string }) {
+  const [hovered, setHovered] = useState(false)
+
   return (
     <button
       onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
       style={{
         background: 'var(--accent)',
         color: 'var(--accent-text)',
@@ -516,6 +572,9 @@ function PlayButton({ onClick, label }: { onClick: () => void; label: string }) 
         fontSize: 16,
         fontWeight: 600,
         cursor: 'pointer',
+        transform: hovered ? 'translateY(-1px) scale(1.02)' : 'none',
+        boxShadow: hovered ? '0 8px 20px -6px var(--accent)' : 'none',
+        transition: 'transform 150ms ease, box-shadow 150ms ease',
       }}
     >
       {label}
