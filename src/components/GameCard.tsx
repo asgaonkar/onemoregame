@@ -147,7 +147,7 @@ function ComplexityBadge({ complexity }: { complexity: GameComplexity }) {
   )
 }
 
-function MouseIcon() {
+export function MouseIcon() {
   return (
     <svg width="11" height="14" viewBox="0 0 16 20" fill="none" aria-hidden="true">
       <rect x="1" y="1" width="14" height="18" rx="7" stroke="currentColor" strokeWidth="1.4" />
@@ -156,7 +156,7 @@ function MouseIcon() {
   )
 }
 
-function PhoneIcon() {
+export function PhoneIcon() {
   return (
     <svg width="10" height="14" viewBox="0 0 16 20" fill="none" aria-hidden="true">
       <rect x="1" y="1" width="14" height="18" rx="2.5" stroke="currentColor" strokeWidth="1.4" />

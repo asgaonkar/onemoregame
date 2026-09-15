@@ -1,9 +1,35 @@
+import { useState } from 'react'
 import { games, categoryOrder } from '../data/games'
 import { GameCard } from '../components/GameCard'
 import { ThemeToggle } from '../components/ThemeToggle'
 import { SettingsButton } from '../components/SettingsButton'
+import {
+  FilterBar,
+  matchesDeviceFilter,
+  type CategoryFilter,
+  type ComplexityFilter,
+  type DeviceFilter,
+} from '../components/FilterBar'
 
 export function Home() {
+  const [category, setCategory] = useState<CategoryFilter>('all')
+  const [complexity, setComplexity] = useState<ComplexityFilter>('all')
+  const [device, setDevice] = useState<DeviceFilter>('all')
+
+  const filtered = games.filter(
+    (g) =>
+      (category === 'all' || g.category === category) &&
+      (complexity === 'all' || g.complexity === complexity) &&
+      matchesDeviceFilter(g.bestOn, device),
+  )
+  const hasResults = filtered.length > 0
+
+  function clearFilters() {
+    setCategory('all')
+    setComplexity('all')
+    setDevice('all')
+  }
+
   return (
     <div
       style={{
@@ -66,12 +92,43 @@ export function Home() {
         </p>
       </section>
 
-      {categoryOrder.map((category) => {
-        const items = games.filter((g) => g.category === category)
+      <FilterBar
+        category={category}
+        onCategoryChange={setCategory}
+        complexity={complexity}
+        onComplexityChange={setComplexity}
+        device={device}
+        onDeviceChange={setDevice}
+      />
+
+      {!hasResults && (
+        <div style={{ textAlign: 'center', padding: '32px 0', color: 'var(--text-dim)' }}>
+          No games match these filters.
+          <div style={{ marginTop: 10 }}>
+            <button
+              onClick={clearFilters}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: 'var(--accent)',
+                fontSize: 14,
+                fontWeight: 600,
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+              }}
+            >
+              Clear filters
+            </button>
+          </div>
+        </div>
+      )}
+
+      {categoryOrder.map((cat) => {
+        const items = filtered.filter((g) => g.category === cat)
         if (items.length === 0) return null
 
         return (
-          <section key={category} style={{ marginBottom: 40 }}>
+          <section key={cat} style={{ marginBottom: 40 }}>
             <div
               style={{
                 fontSize: 13,
@@ -82,7 +139,7 @@ export function Home() {
                 marginBottom: 14,
               }}
             >
-              {category}
+              {cat}
             </div>
             <div
               style={{
