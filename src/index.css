@@ -55,26 +55,18 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* --grid-color is set inline on body by ThemeProvider, scaled by the
+   background opacity slider (see src/lib/theme.tsx). */
 body[data-bg-style='dots'] {
-  background-image: radial-gradient(var(--grid-dot-subtle) 1.4px, transparent 1.4px);
+  background-image: radial-gradient(var(--grid-color) 1.4px, transparent 1.4px);
   background-size: 24px 24px;
-}
-
-body[data-bg-style='dots'][data-bg-intensity='bold'] {
-  background-image: radial-gradient(var(--grid-dot-bold) 1.4px, transparent 1.4px);
 }
 
 body[data-bg-style='lines'] {
   background-image:
-    linear-gradient(var(--grid-line-subtle) 1px, transparent 1px),
-    linear-gradient(90deg, var(--grid-line-subtle) 1px, transparent 1px);
+    linear-gradient(var(--grid-color) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-color) 1px, transparent 1px);
   background-size: 32px 32px;
-}
-
-body[data-bg-style='lines'][data-bg-intensity='bold'] {
-  background-image:
-    linear-gradient(var(--grid-line-bold) 1px, transparent 1px),
-    linear-gradient(90deg, var(--grid-line-bold) 1px, transparent 1px);
 }
 
 #root {

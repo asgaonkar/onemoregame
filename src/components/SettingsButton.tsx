@@ -1,9 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import {
-  useTheme,
-  type BackgroundIntensity,
-  type BackgroundStyle,
-} from '../lib/theme'
+import { useTheme, type BackgroundStyle } from '../lib/theme'
 
 const STYLE_OPTIONS: { value: BackgroundStyle; label: string }[] = [
   { value: 'none', label: 'None' },
@@ -11,13 +7,8 @@ const STYLE_OPTIONS: { value: BackgroundStyle; label: string }[] = [
   { value: 'lines', label: 'Lines' },
 ]
 
-const INTENSITY_OPTIONS: { value: BackgroundIntensity; label: string }[] = [
-  { value: 'subtle', label: 'Subtle' },
-  { value: 'bold', label: 'Bold' },
-]
-
 export function SettingsButton() {
-  const { bgStyle, setBgStyle, bgIntensity, setBgIntensity } = useTheme()
+  const { bgStyle, setBgStyle, bgOpacity, setBgOpacity } = useTheme()
   const [open, setOpen] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
 
@@ -101,20 +92,38 @@ export function SettingsButton() {
             <>
               <div
                 style={{
-                  fontSize: 11,
-                  fontWeight: 600,
-                  letterSpacing: 0.5,
-                  color: 'var(--text-faint)',
-                  textTransform: 'uppercase',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'baseline',
                   margin: '14px 0 10px',
                 }}
               >
-                Intensity
+                <div
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 600,
+                    letterSpacing: 0.5,
+                    color: 'var(--text-faint)',
+                    textTransform: 'uppercase',
+                  }}
+                >
+                  Transparency
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>
+                  {Math.round(bgOpacity * 100)}%
+                </div>
               </div>
-              <OptionRow
-                options={INTENSITY_OPTIONS}
-                value={bgIntensity}
-                onChange={setBgIntensity}
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={Math.round(bgOpacity * 100)}
+                onChange={(e) => setBgOpacity(Number(e.target.value) / 100)}
+                style={{
+                  width: '100%',
+                  accentColor: 'var(--accent)',
+                  cursor: 'pointer',
+                }}
               />
             </>
           )}
