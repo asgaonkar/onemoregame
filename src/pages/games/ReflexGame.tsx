@@ -47,7 +47,7 @@ function targetSizeFor(t: number): number {
 }
 
 function maxResponseMsFor(t: number): number {
-  return lerp(1200, 550, t)
+  return lerp(1500, 750, t)
 }
 
 // The "score" for a round is just its time in ms — lower is better — except
