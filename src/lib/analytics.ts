@@ -1,8 +1,6 @@
 // Google Analytics 4 (gtag.js), loaded lazily and only when a real
-// Measurement ID has been set below. Replace the placeholder once you've
-// created a free GA4 property at analytics.google.com (Admin > Create
-// Property > Web > copy the "G-XXXXXXXXXX" Measurement ID).
-const GA_MEASUREMENT_ID = 'G-XXXXXXXXXX'
+// Measurement ID has been set below.
+const GA_MEASUREMENT_ID: string = 'G-W86TX6VSJN'
 
 declare global {
   interface Window {
