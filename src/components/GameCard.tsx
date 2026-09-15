@@ -15,27 +15,28 @@ const COMPLEXITY_TITLE: Record<GameComplexity, string> = {
   hard: 'Takes a moment to grok',
 }
 
+// Only ever rendered for a 'live' game — Home filters out 'soon' games
+// before this is reached, since even their name/tagline would give away
+// what's coming next.
 export function GameCard({ game }: { game: GameMeta }) {
-  const locked = game.status === 'soon'
+  const style: CSSProperties = {
+    display: 'block',
+    padding: 20,
+    borderRadius: 'var(--radius-md)',
+    border: '1px solid var(--border)',
+    background: 'var(--bg-card)',
+    textDecoration: 'none',
+    height: '100%',
+  }
 
-  const content = (
-    <>
+  return (
+    <Link to={`/${game.id}`} style={style}>
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
-        <div
-          style={{
-            fontSize: 20,
-            fontWeight: 600,
-            color: locked ? 'var(--text-faint)' : 'var(--text)',
-          }}
-        >
-          {game.name}
+        <div style={{ fontSize: 20, fontWeight: 600, color: 'var(--text)' }}>{game.name}</div>
+        <div style={{ display: 'flex', gap: 6, flexShrink: 0, marginTop: 3 }}>
+          <DeviceBadge bestOn={game.bestOn} />
+          <ComplexityBadge complexity={game.complexity} />
         </div>
-        {!locked && (
-          <div style={{ display: 'flex', gap: 6, flexShrink: 0, marginTop: 3 }}>
-            <DeviceBadge bestOn={game.bestOn} />
-            <ComplexityBadge complexity={game.complexity} />
-          </div>
-        )}
       </div>
       <p
         style={{
@@ -48,38 +49,9 @@ export function GameCard({ game }: { game: GameMeta }) {
       >
         {game.tagline}
       </p>
-      <div
-        style={{
-          marginTop: 18,
-          fontSize: 13,
-          fontWeight: 500,
-          color: locked ? 'var(--text-faint)' : 'var(--accent)',
-        }}
-      >
-        {locked ? 'Coming soon' : 'Play now →'}
+      <div style={{ marginTop: 18, fontSize: 13, fontWeight: 500, color: 'var(--accent)' }}>
+        Play now →
       </div>
-    </>
-  )
-
-  const style: CSSProperties = {
-    display: 'block',
-    padding: 20,
-    borderRadius: 'var(--radius-md)',
-    border: '1px solid var(--border)',
-    background: 'var(--bg-card)',
-    textDecoration: 'none',
-    height: '100%',
-  }
-
-  if (locked) {
-    return (
-      <div style={{ ...style, opacity: 0.6, cursor: 'default' }}>{content}</div>
-    )
-  }
-
-  return (
-    <Link to={`/${game.id}`} style={style}>
-      {content}
     </Link>
   )
 }

@@ -17,6 +17,16 @@ import { AimGame } from './pages/games/AimGame'
 import { RiskGame } from './pages/games/RiskGame'
 import { MatchGame } from './pages/games/MatchGame'
 import { NotFound } from './pages/NotFound'
+import { getGame } from './data/games'
+import type { ReactElement } from 'react'
+
+// A game route only renders when its data entry is marked 'live' — visiting
+// a locked game's URL directly (guessing it, an old link, editing
+// localStorage, whatever) lands on the same 404 as any other unknown path,
+// instead of the route working regardless of what the home page shows.
+function liveRoute(id: string, element: ReactElement): ReactElement {
+  return getGame(id)?.status === 'live' ? element : <NotFound />
+}
 
 export function App() {
   return (
@@ -25,20 +35,23 @@ export function App() {
         <AnalyticsTracker />
         <Routes>
           <Route path="/" element={<Home />} />
-          <Route path="/center" element={<CenterGame />} />
-          <Route path="/wait" element={<WaitGame />} />
-          <Route path="/guess-distance" element={<GuessDistanceGame />} />
-          <Route path="/blink" element={<BlinkGame />} />
-          <Route path="/count" element={<CountGame />} />
-          <Route path="/swap" element={<SwapGame />} />
-          <Route path="/crowd" element={<CrowdGame />} />
-          <Route path="/trace" element={<TraceGame />} />
-          <Route path="/mirror" element={<MirrorGame />} />
-          <Route path="/reflex" element={<ReflexGame />} />
-          <Route path="/sequence" element={<SequenceGame />} />
-          <Route path="/aim" element={<AimGame />} />
-          <Route path="/risk" element={<RiskGame />} />
-          <Route path="/match" element={<MatchGame />} />
+          <Route path="/center" element={liveRoute('center', <CenterGame />)} />
+          <Route path="/wait" element={liveRoute('wait', <WaitGame />)} />
+          <Route
+            path="/guess-distance"
+            element={liveRoute('guess-distance', <GuessDistanceGame />)}
+          />
+          <Route path="/blink" element={liveRoute('blink', <BlinkGame />)} />
+          <Route path="/count" element={liveRoute('count', <CountGame />)} />
+          <Route path="/swap" element={liveRoute('swap', <SwapGame />)} />
+          <Route path="/crowd" element={liveRoute('crowd', <CrowdGame />)} />
+          <Route path="/trace" element={liveRoute('trace', <TraceGame />)} />
+          <Route path="/mirror" element={liveRoute('mirror', <MirrorGame />)} />
+          <Route path="/reflex" element={liveRoute('reflex', <ReflexGame />)} />
+          <Route path="/sequence" element={liveRoute('sequence', <SequenceGame />)} />
+          <Route path="/aim" element={liveRoute('aim', <AimGame />)} />
+          <Route path="/risk" element={liveRoute('risk', <RiskGame />)} />
+          <Route path="/match" element={liveRoute('match', <MatchGame />)} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </HashRouter>

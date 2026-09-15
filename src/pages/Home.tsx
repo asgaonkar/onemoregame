@@ -16,8 +16,11 @@ export function Home() {
   const [complexity, setComplexity] = useState<ComplexityFilter>('all')
   const [device, setDevice] = useState<DeviceFilter>('all')
 
+  // Locked ('soon') games never render here at all — showing their name and
+  // description would give away what's coming next.
   const filtered = games.filter(
     (g) =>
+      g.status === 'live' &&
       (category === 'all' || g.category === category) &&
       (complexity === 'all' || g.complexity === complexity) &&
       matchesDeviceFilter(g.bestOn, device),
@@ -155,6 +158,20 @@ export function Home() {
           </section>
         )
       })}
+
+      <div
+        style={{
+          textAlign: 'center',
+          padding: '36px 20px',
+          border: '1px dashed var(--border)',
+          borderRadius: 'var(--radius-md)',
+        }}
+      >
+        <div style={{ fontSize: 15, fontWeight: 600 }}>More games coming soon</div>
+        <div style={{ marginTop: 6, fontSize: 13, color: 'var(--text-dim)' }}>
+          New challenges get added regularly — check back later.
+        </div>
+      </div>
     </div>
   )
 }
