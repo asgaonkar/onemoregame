@@ -30,6 +30,11 @@ const HIGHLIGHT_MS = 1000
 const BASE_MOVE_MS = 3500
 const MAX_MOVE_MS_BONUS = 2000 // extra tracking time (and difficulty) at t=1
 
+// A correct hit's score scales with difficulty, same as Swap — harder
+// rounds (a bigger, faster-moving crowd) pay more for a correct guess.
+const CORRECT_SCORE_MIN = 60
+const CORRECT_SCORE_MAX = 100
+
 const DOT_R = 4 // dot "radius" in board percentage-space, keeps dots off the edges
 const MIN_SEPARATION_PCT = 12
 // The board keeps a 4/3 aspect ratio, so a dot moving at the same %/s in x
@@ -43,6 +48,7 @@ const ASPECT_Y_COMPENSATION = 4 / 3
 type DotState = { id: number; x: number; y: number; vx: number; vy: number }
 
 type Round = {
+  t: number
   count: number
   targetId: number
   guessId: number | null
@@ -238,7 +244,7 @@ function CrowdRun({
 
     dotsRef.current = newDots
     setDots(newDots)
-    setRounds((rs) => [...rs, { count, targetId, guessId: null, correct: false, score: 0 }])
+    setRounds((rs) => [...rs, { t, count, targetId, guessId: null, correct: false, score: 0 }])
     setStage('highlight')
     setPhase('playing')
 
@@ -282,7 +288,9 @@ function CrowdRun({
     const hitRadiusPx = Math.max(28, rect.width * (DOT_R / 100) * 2.2)
     const guessId = nearestDistPx <= hitRadiusPx ? nearestId : null
     const correct = guessId !== null && guessId === current.targetId
-    const score = correct ? 100 : 0
+    const score = correct
+      ? Math.round(CORRECT_SCORE_MIN + (CORRECT_SCORE_MAX - CORRECT_SCORE_MIN) * current.t)
+      : 0
 
     setRounds((rs) =>
       rs.map((r, i) => (i === currentIndex ? { ...r, guessId, correct, score } : r)),
