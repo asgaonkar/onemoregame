@@ -36,6 +36,7 @@ type Round = {
   hintHi: number
   guessedDistance: number | null
   score: number
+  diffPx: number
   flashMs: number
   t: number
 }
@@ -78,6 +79,7 @@ function emptyRound(rng: Rng, t: number): Round {
     hintHi: 0,
     guessedDistance: null,
     score: 0,
+    diffPx: 0,
     flashMs: flashMsFor(t),
     t,
   }
@@ -230,8 +232,9 @@ function GuessDistanceRun({
     processedRef.current = currentIndex
     const guessedDistance = Math.max(0, Math.round(guessDraft))
     const score = scoreFor(current.actualDistance, guessedDistance, current.diagonal)
+    const diffPx = Math.abs(guessedDistance - current.actualDistance)
     setRounds((rs) =>
-      rs.map((r, i) => (i === currentIndex ? { ...r, guessedDistance, score } : r)),
+      rs.map((r, i) => (i === currentIndex ? { ...r, guessedDistance, score, diffPx } : r)),
     )
     if (isEndless && isMiss(score)) setLives((l) => l - 1)
     setPhase('roundResult')
@@ -244,7 +247,12 @@ function GuessDistanceRun({
       return
     }
     if (config.mode === 'daily') markDailyPlayed(GAME_ID, finalScore)
-    if (config.mode !== 'practice') setRuns(addRun(GAME_ID, config.mode, finalScore))
+    if (config.mode !== 'practice') {
+      // Endless's final score is "rounds survived" (higher is better, like
+      // every other game's Endless). Fixed-round modes score by average
+      // pixel difference (lower is better) — flip the leaderboard sort.
+      setRuns(addRun(GAME_ID, config.mode, finalScore, { ascending: !isEndless }))
+    }
     setPhase('done')
   }
 
@@ -259,7 +267,7 @@ function GuessDistanceRun({
       return
     }
     if (rounds.length >= FIXED_ROUNDS) {
-      finish(rounds.reduce((s, r) => s + r.score, 0) / rounds.length)
+      finish(rounds.reduce((s, r) => s + r.diffPx, 0) / rounds.length)
       return
     }
     setRounds((rs) => [...rs, makeRound(rs.length + 1)])
@@ -390,12 +398,9 @@ function GuessDistanceRun({
                   <span>Actual: {current.actualDistance.toFixed(0)}px</span>
                   <span>Guessed: {current.guessedDistance.toFixed(0)}px</span>
                 </div>
-                <div style={{ fontSize: 15, color: 'var(--text-dim)' }}>
-                  {Math.abs(current.guessedDistance - current.actualDistance).toFixed(0)}px off
-                </div>
                 <div style={{ fontSize: 32, fontWeight: 700, margin: '4px 0 20px' }}>
-                  {current.score.toFixed(1)}
-                  <span style={{ fontSize: 16, color: 'var(--text-faint)' }}>/100</span>
+                  {current.diffPx.toFixed(0)}
+                  <span style={{ fontSize: 16, color: 'var(--text-faint)' }}> px off</span>
                 </div>
                 <PlayButton
                   onClick={nextRound}
@@ -424,11 +429,8 @@ function GuessDistanceRun({
                   }}
                 >
                   <span>Round {i + 1}</span>
-                  <span>
-                    {Math.abs((r.guessedDistance ?? 0) - (r.actualDistance ?? 0)).toFixed(0)}px off
-                  </span>
                   <span style={{ fontWeight: 600, color: 'var(--text)' }}>
-                    {r.score.toFixed(1)}
+                    {r.diffPx.toFixed(0)}px off
                   </span>
                 </div>
               ))}
@@ -436,12 +438,12 @@ function GuessDistanceRun({
           )}
           <div style={{ textAlign: 'center' }}>
             <div style={{ fontSize: 13, color: 'var(--text-faint)' }}>
-              {isEndless ? 'ROUNDS SURVIVED' : 'AVERAGE SCORE'}
+              {isEndless ? 'ROUNDS SURVIVED' : 'AVERAGE PX OFF'}
             </div>
             <div style={{ fontSize: 44, fontWeight: 700, margin: '4px 0 24px' }}>
               {isEndless
                 ? rounds.length
-                : (rounds.reduce((s, r) => s + r.score, 0) / rounds.length).toFixed(1)}
+                : (rounds.reduce((s, r) => s + r.diffPx, 0) / rounds.length).toFixed(0)}
             </div>
             {onPlayAgain ? (
               <PlayButton onClick={onPlayAgain} label="Play again" />
@@ -457,7 +459,7 @@ function GuessDistanceRun({
           {config.mode !== 'practice' && (
             <LocalLeaderboard
               runs={runs}
-              formatScore={isEndless ? (s) => `${s.toFixed(0)} rounds` : undefined}
+              formatScore={isEndless ? (s) => `${s.toFixed(0)} rounds` : (s) => `${s.toFixed(0)}px off`}
             />
           )}
         </div>
