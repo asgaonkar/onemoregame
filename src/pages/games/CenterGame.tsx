@@ -348,7 +348,12 @@ function CenterRun({
       return
     }
     if (config.mode === 'daily') markDailyPlayed(gameId, finalScore)
-    if (config.mode !== 'practice') setRuns(addRun(gameId, config.mode, finalScore))
+    if (config.mode !== 'practice') {
+      // Endless's final score is "rounds survived" (higher is better, like
+      // every other game's Endless). Fixed-round modes score by average
+      // pixel distance (lower is better) — flip the leaderboard sort.
+      setRuns(addRun(gameId, config.mode, finalScore, { ascending: !isEndless }))
+    }
     setPhase('done')
   }
 
@@ -363,7 +368,7 @@ function CenterRun({
       return
     }
     if (rounds.length >= FIXED_ROUNDS) {
-      finish(rounds.reduce((s, r) => s + r.score, 0) / rounds.length)
+      finish(rounds.reduce((s, r) => s + r.distance, 0) / rounds.length)
       return
     }
     setRounds((rs) => [...rs, makeRound(rs.length + 1)])
@@ -463,12 +468,9 @@ function CenterRun({
 
           {phase === 'roundResult' && current.guess && (
             <div style={{ textAlign: 'center', marginTop: 20 }}>
-              <div style={{ fontSize: 15, color: 'var(--text-dim)' }}>
-                {current.distance.toFixed(0)}px off
-              </div>
-              <div style={{ fontSize: 32, fontWeight: 700, margin: '4px 0 20px' }}>
-                {current.score.toFixed(1)}
-                <span style={{ fontSize: 16, color: 'var(--text-faint)' }}>/100</span>
+              <div style={{ fontSize: 32, fontWeight: 700, margin: '20px 0' }}>
+                {current.distance.toFixed(0)}
+                <span style={{ fontSize: 16, color: 'var(--text-faint)' }}> px off</span>
               </div>
               <PlayButton
                 onClick={nextRound}
@@ -497,9 +499,8 @@ function CenterRun({
                   }}
                 >
                   <span>Round {i + 1}</span>
-                  <span>{r.distance.toFixed(0)}px off</span>
                   <span style={{ fontWeight: 600, color: 'var(--text)' }}>
-                    {r.score.toFixed(1)}
+                    {r.distance.toFixed(0)}px off
                   </span>
                 </div>
               ))}
@@ -507,12 +508,12 @@ function CenterRun({
           )}
           <div style={{ textAlign: 'center' }}>
             <div style={{ fontSize: 13, color: 'var(--text-faint)' }}>
-              {isEndless ? 'ROUNDS SURVIVED' : 'AVERAGE SCORE'}
+              {isEndless ? 'ROUNDS SURVIVED' : 'AVERAGE PX OFF'}
             </div>
             <div style={{ fontSize: 44, fontWeight: 700, margin: '4px 0 24px' }}>
               {isEndless
                 ? rounds.length
-                : (rounds.reduce((s, r) => s + r.score, 0) / rounds.length).toFixed(1)}
+                : (rounds.reduce((s, r) => s + r.distance, 0) / rounds.length).toFixed(0)}
             </div>
             {onPlayAgain ? (
               <PlayButton onClick={onPlayAgain} label="Play again" />
@@ -528,7 +529,7 @@ function CenterRun({
           {config.mode !== 'practice' && (
             <LocalLeaderboard
               runs={runs}
-              formatScore={isEndless ? (s) => `${s.toFixed(0)} rounds` : undefined}
+              formatScore={isEndless ? (s) => `${s.toFixed(0)} rounds` : (s) => `${s.toFixed(0)}px off`}
             />
           )}
         </div>
