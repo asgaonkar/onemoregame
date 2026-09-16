@@ -387,7 +387,7 @@ function BlinkRun({
       return
     }
     if (rounds.length >= FIXED_ROUNDS) {
-      finish(rounds.reduce((s, r) => s + r.score, 0) / rounds.length)
+      finish(rounds.filter((r) => r.hit).length)
       return
     }
     setRounds((rs) => [...rs, makeRound(rs.length + 1)])
@@ -495,9 +495,14 @@ function BlinkRun({
                 <div style={{ fontSize: 15, color: 'var(--text-dim)' }}>
                   {MOD_LABEL[current.modType]} · {current.distance.toFixed(0)}px away
                 </div>
-                <div style={{ fontSize: 32, fontWeight: 700, margin: '4px 0 20px' }}>
-                  {current.score.toFixed(0)}
-                  <span style={{ fontSize: 16, color: 'var(--text-faint)' }}>/100</span>
+                <div
+                  style={{
+                    fontSize: 14,
+                    color: 'var(--text-faint)',
+                    margin: '4px 0 20px',
+                  }}
+                >
+                  {current.gapMs}ms gap · {current.previewMs}ms preview
                 </div>
                 <PlayButton
                   onClick={nextRound}
@@ -526,22 +531,27 @@ function BlinkRun({
                   }}
                 >
                   <span>Round {i + 1}</span>
-                  <span>{MOD_LABEL[r.modType]}</span>
                   <span style={{ fontWeight: 600, color: 'var(--text)' }}>
-                    {r.score.toFixed(0)}
+                    {r.hit ? 'Correct' : 'Missed'}
                   </span>
+                  <span>{MOD_LABEL[r.modType]}</span>
                 </div>
               ))}
             </div>
           )}
           <div style={{ textAlign: 'center' }}>
-            <div style={{ fontSize: 13, color: 'var(--text-faint)' }}>
-              {isEndless ? 'ROUNDS SURVIVED' : 'AVERAGE SCORE'}
-            </div>
+            <div style={{ fontSize: 13, color: 'var(--text-faint)' }}>ROUNDS SURVIVED</div>
             <div style={{ fontSize: 44, fontWeight: 700, margin: '4px 0 24px' }}>
-              {isEndless
-                ? rounds.length
-                : (rounds.reduce((s, r) => s + r.score, 0) / rounds.length).toFixed(1)}
+              {isEndless ? (
+                rounds.length
+              ) : (
+                <>
+                  {rounds.filter((r) => r.hit).length}
+                  <span style={{ fontSize: 20, color: 'var(--text-faint)' }}>
+                    /{FIXED_ROUNDS}
+                  </span>
+                </>
+              )}
             </div>
             {onPlayAgain ? (
               <PlayButton onClick={onPlayAgain} label="Play again" />
@@ -555,10 +565,7 @@ function BlinkRun({
             <LinkButton onClick={onChangeMode} label="Change mode" />
           </div>
           {config.mode !== 'practice' && (
-            <LocalLeaderboard
-              runs={runs}
-              formatScore={isEndless ? (s) => `${s.toFixed(0)} rounds` : undefined}
-            />
+            <LocalLeaderboard runs={runs} formatScore={(s) => `${s.toFixed(0)} rounds`} />
           )}
         </div>
       )}
