@@ -34,14 +34,16 @@ export function initAnalytics(): void {
     window.dataLayer.push(args)
   }
   window.gtag('js', new Date())
-  // send_page_view is off: HashRouter navigations never trigger a real page
-  // load or a pushState history event, so GA's automatic pageview tracking
-  // can't see route changes. Page views are sent manually instead — see
-  // AnalyticsTracker, which fires one per route change with the game's name
-  // as the page path/title, which is what makes GA4's per-page "average
-  // engagement time" report break down by game rather than lumping the
-  // whole single-page app into one row.
-  window.gtag('config', GA_MEASUREMENT_ID, { send_page_view: false })
+  // Left at its default (auto page_view on config) instead of disabling it:
+  // that first hit's delivery is handled by gtag.js's own internal load
+  // sequencing, which is reliable. A manually-pushed page_view event fired
+  // in the same synchronous tick — before gtag.js has even been fetched —
+  // is not: it depends on gtag.js correctly flushing a pre-load dataLayer
+  // backlog, which in practice doesn't always happen. HashRouter route
+  // changes after this first load still need manual tracking (see
+  // AnalyticsTracker), since they never trigger a real page load, but by
+  // then gtag.js has had plenty of time to finish loading.
+  window.gtag('config', GA_MEASUREMENT_ID)
 }
 
 export function trackPageView(path: string, title: string): void {
