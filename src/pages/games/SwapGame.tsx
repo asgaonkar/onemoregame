@@ -282,7 +282,7 @@ function SwapRun({
       return
     }
     if (rounds.length >= FIXED_ROUNDS) {
-      finish(rounds.reduce((s, r) => s + r.score, 0) / rounds.length)
+      finish(rounds.filter((r) => r.score > 0).length)
       return
     }
     setRounds((rs) => [...rs, makeRound(rng, rs.length + 1, config.mode)])
@@ -414,12 +414,11 @@ function SwapRun({
 
           {phase === 'roundResult' && (
             <div style={{ textAlign: 'center', marginTop: 20 }}>
-              <div style={{ fontSize: 15, color: 'var(--text-dim)' }}>
+              <div style={{ fontSize: 20, fontWeight: 700, margin: '4px 0 8px' }}>
                 {current.score > 0 ? 'Correct' : `It was slot ${current.correctSlot + 1}`}
               </div>
-              <div style={{ fontSize: 32, fontWeight: 700, margin: '4px 0 20px' }}>
-                {current.score.toFixed(0)}
-                <span style={{ fontSize: 16, color: 'var(--text-faint)' }}>/100</span>
+              <div style={{ fontSize: 14, color: 'var(--text-faint)', marginBottom: 20 }}>
+                {current.swaps.length} swaps · {Math.round(current.swapStepMs)}ms/swap
               </div>
               <PlayButton
                 onClick={nextRound}
@@ -448,22 +447,29 @@ function SwapRun({
                   }}
                 >
                   <span>Round {i + 1}</span>
-                  <span>{r.score > 0 ? 'Correct' : 'Missed'}</span>
                   <span style={{ fontWeight: 600, color: 'var(--text)' }}>
-                    {r.score.toFixed(0)}
+                    {r.score > 0 ? 'Correct' : 'Missed'}
+                  </span>
+                  <span>
+                    {r.swaps.length} swaps · {Math.round(r.swapStepMs)}ms/swap
                   </span>
                 </div>
               ))}
             </div>
           )}
           <div style={{ textAlign: 'center' }}>
-            <div style={{ fontSize: 13, color: 'var(--text-faint)' }}>
-              {isEndless ? 'ROUNDS SURVIVED' : 'AVERAGE SCORE'}
-            </div>
+            <div style={{ fontSize: 13, color: 'var(--text-faint)' }}>ROUNDS SURVIVED</div>
             <div style={{ fontSize: 44, fontWeight: 700, margin: '4px 0 24px' }}>
-              {isEndless
-                ? rounds.length
-                : (rounds.reduce((s, r) => s + r.score, 0) / rounds.length).toFixed(1)}
+              {isEndless ? (
+                rounds.length
+              ) : (
+                <>
+                  {rounds.filter((r) => r.score > 0).length}
+                  <span style={{ fontSize: 20, color: 'var(--text-faint)' }}>
+                    /{FIXED_ROUNDS}
+                  </span>
+                </>
+              )}
             </div>
             {onPlayAgain ? (
               <PlayButton onClick={onPlayAgain} label="Play again" />
@@ -477,10 +483,7 @@ function SwapRun({
             <LinkButton onClick={onChangeMode} label="Change mode" />
           </div>
           {config.mode !== 'practice' && (
-            <LocalLeaderboard
-              runs={runs}
-              formatScore={isEndless ? (s) => `${s.toFixed(0)} rounds` : undefined}
-            />
+            <LocalLeaderboard runs={runs} formatScore={(s) => `${s.toFixed(0)} rounds`} />
           )}
         </div>
       )}
