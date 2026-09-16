@@ -22,6 +22,10 @@ const GAME_ID = 'reflex'
 // real reaction, so it naturally drags a run's average down without needing
 // a separate 0-100 score concept. Lower is always better here.
 const FAIL_MS = 2000
+// How long the player has to react once the target appears, regardless of
+// difficulty — generous on purpose, so a slow reaction is never mistaken for
+// a missed/mistimed click.
+const MAX_RESPONSE_MS = 5000
 
 type Outcome = 'pending' | 'hit' | 'falseStart' | 'timeout'
 
@@ -46,10 +50,6 @@ function targetSizeFor(t: number): number {
   return lerp(16, 7, t)
 }
 
-function maxResponseMsFor(t: number): number {
-  return lerp(1500, 750, t)
-}
-
 // The "score" for a round is just its time in ms — lower is better — except
 // failures, which are penalized with a fixed worst-case sentinel.
 function timeFor(round: Round): number {
@@ -63,7 +63,7 @@ function formatMs(ms: number): string {
 function makeRound(rng: Rng, roundNum: number, mode: GameMode): Round {
   const t = difficultyForRound(roundNum, mode)
   const sizePct = targetSizeFor(t)
-  const maxResponseMs = maxResponseMsFor(t)
+  const maxResponseMs = MAX_RESPONSE_MS
   const waitMs = 600 + rng() * 1600 // [600, 2200)
   const x = sizePct / 2 + rng() * (100 - sizePct)
   const y = sizePct / 2 + rng() * (100 - sizePct)
